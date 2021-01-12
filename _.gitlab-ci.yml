@@ -1,0 +1,33 @@
+stages:
+  - lint
+  - test
+  - build
+  - upload
+
+lint:
+  tags: None
+  stage: lint
+  image: None
+  script: _CI/scripts/lint.py
+
+test:
+  tags: None
+  stage: test
+  image: None
+  script: _CI/scripts/test.py
+
+build:
+  tags: None
+  stage: build
+  image: None
+  script: _CI/scripts/build.py
+
+upload:
+  tags: None
+  stage: upload
+  image: None
+  only:
+    - tags
+  except:
+    - branches
+  script: _CI/scripts/upload.py
