@@ -65,4 +65,10 @@ Instead use the provided build and upload scripts that create all the necessary 
 Project Features
 ================
 
-* TODO
+* Lists accounts and OUs under Control Tower
+* Lists OUs under Organization
+* Create and delete and OU under Control Tower and register in Control Tower an OU created under Organizations
+* Create and terminate accounts under Control Tower
+    (Accounts terminated are deleted from control tower and service catalog and moved under Organizations in an OU called
+     Suspended. The OU needs to exist and it should have a completely restrictive SCP applied to it)
+* Some other stuff...
