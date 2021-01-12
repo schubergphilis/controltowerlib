@@ -21,7 +21,7 @@ Using of pipenv is highly recommended.
 
 1. Clone your fork locally::
 
-    $ git clone ssh://git@sbp.gitlab.schubergphilis.com:2228/cat/control-tower/controltowerlib.git
+    $ git clone git@github.com:schubergphilis/controltowerlib.git
 
 2. Install your local copy into a virtualenv. Assuming you have pipenv installed, this is how you set up your clone for local development::
 
