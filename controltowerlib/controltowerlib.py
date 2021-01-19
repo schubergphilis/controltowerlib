@@ -618,12 +618,13 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             control.
 
         """
-        payload = self._get_api_payload(content_string={}, target='listManagedOrganizationalUnits')
+        payload = self._get_api_payload(content_string={'MaxResults': 50}, target='listManagedOrganizationalUnits')
         self.logger.debug('Trying to retrieve OUs with payload "%s" to url %s', payload, self.url)
         response = self.session.post(self.url, json=payload)
         if not response.ok:
             self.logger.error('Status Code: %s, Response Text :%s', response.status_code, response.text)
             return []
+        self.logger.debug(response.text)
         return [ControlTowerOU(self, data)
                 for data in response.json().get('ManagedOrganizationalUnitList', [])]
 
