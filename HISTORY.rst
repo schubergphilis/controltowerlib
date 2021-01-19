@@ -13,3 +13,9 @@ History
 ------------------
 
 * First public release.
+
+
+0.1.1 (19-01-2021)
+------------------
+
+* Working around the OU pagination until the implementation fixes that properly.
