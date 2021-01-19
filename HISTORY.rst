@@ -19,3 +19,9 @@ History
 ------------------
 
 * Working around the OU pagination until the implementation fixes that properly.
+
+
+0.1.2 (19-01-2021)
+------------------
+
+* Fixed pagination bug properly.
