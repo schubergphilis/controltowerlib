@@ -367,6 +367,9 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
         self.attach_service_control_policy(self.control_tower.suspended_ou_name)
         self.detach_service_control_policy('FullAWSAccess')
 
+    def update(self):
+        pass
+
 
 class OrganizationsOU:
     """Model the data of an Organizations managed OU."""
