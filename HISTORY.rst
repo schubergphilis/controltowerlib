@@ -25,3 +25,9 @@ History
 ------------------
 
 * Fixed pagination bug properly.
+
+
+0.2.0 (28-01-2021)
+------------------
+
+* Implemented control tower versions and account update capabilites.
