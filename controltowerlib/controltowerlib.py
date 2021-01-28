@@ -378,7 +378,24 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
         self.detach_service_control_policy('FullAWSAccess')
 
     def update(self):
-        pass
+        # FIX THIS TO ACTUALLY WORK
+        arguments = {'ProductId': self.service_catalog_product_id,
+                     'ProvisionedProductName': self.name,
+                     'ProvisioningArtifactId': self.provisioning_artifact_id,
+                     'ProvisioningParameters': [{'Key': 'AccountName',
+                                                 'Value': self.name},
+                                                {'Key': 'AccountEmail',
+                                                 'Value': self.email},
+                                                {'Key': 'SSOUserFirstName',
+                                                 'Value': 'Control'},
+                                                {'Key': 'SSOUserLastName',
+                                                 'Value': 'Tower'},
+                                                {'Key': 'SSOUserEmail',
+                                                 'Value': self.sso_user_email},
+                                                {'Key': 'ManagedOrganizationalUnit',
+                                                 'Value': self.organizational_unit.name}]}
+        response = self.service_catalog.update_provisioned_product(**arguments)
+        return response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200
 
 
 class OrganizationsOU:
