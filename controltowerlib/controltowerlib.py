@@ -203,6 +203,16 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
         return self._data_.get('Status')
 
     @property
+    def landing_zone_version(self):
+        """Landing zone version."""
+        return self._data_.get('DeployedLandingZoneVersion')
+
+    @property
+    def has_available_update(self):
+        """If the account is behind the landing zone version."""
+        return float(self.landing_zone_version) < float(self.control_tower.landing_zone_version)
+
+    @property
     def guardrail_compliance_status(self):
         """Retrieves the guardrail compliancy status for the account.
 
@@ -367,6 +377,33 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
         self.attach_service_control_policy(self.control_tower.suspended_ou_name)
         self.detach_service_control_policy('FullAWSAccess')
 
+    def update(self):
+        if not self.has_available_update:
+            return True
+        arguments = {'ProductId': self.control_tower._account_factory.product_id,
+                     'ProvisionedProductName': self.name,
+                     'ProvisioningArtifactId': self.control_tower._active_artifact.get('Id'),
+                     'ProvisioningParameters': [{'Key': 'AccountName',
+                                                 'Value': self.name,
+                                                 'UsePreviousValue': True},
+                                                {'Key': 'AccountEmail',
+                                                 'Value': self.email,
+                                                 'UsePreviousValue': True},
+                                                {'Key': 'SSOUserFirstName',
+                                                 'Value': 'Control',
+                                                 'UsePreviousValue': True},
+                                                {'Key': 'SSOUserLastName',
+                                                 'Value': 'Tower',
+                                                 'UsePreviousValue': True},
+                                                {'Key': 'SSOUserEmail',
+                                                 'Value': self.email,
+                                                 'UsePreviousValue': True},
+                                                {'Key': 'ManagedOrganizationalUnit',
+                                                 'Value': self.organizational_unit.name,
+                                                 'UsePreviousValue': True}]}
+        response = self.service_catalog.update_provisioned_product(**arguments)
+        return response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200
+
 
 class OrganizationsOU:
     """Model the data of an Organizations managed OU."""
@@ -448,7 +485,8 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          'listManagedAccounts',
                          'getGuardrailComplianceStatus',
                          'describeManagedOrganizationalUnit',
-                         'listGuardrailsForTarget']
+                         'listGuardrailsForTarget',
+                         'getAvailableUpdates']
 
     def __init__(self, arn, settling_time=60, suspended_ou_name='Suspended'):
         self.aws_authenticator = AwsAuthenticator(arn)
@@ -461,6 +499,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         self.settling_time = settling_time
         self.suspended_ou_name = suspended_ou_name
         self._root_ou = None
+        self._update_data_ = None
 
     @property
     def root_ou(self):
@@ -522,7 +561,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
     def _get_paginated_results(self,  # pylint: disable=too-many-arguments, too-many-locals
                                content_payload,
                                target,
-                               object_group,
+                               object_group=None,
                                object_type=None,
                                method='POST',
                                params=None,
@@ -536,21 +575,27 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                                         path=f'/{path}/' if path else '/',
                                         region=region)
         response, next_token = self._get_partial_response(payload, next_token_marker)
-        for data in response.json().get(object_group, []):
-            if object_type:
-                yield object_type(self, data)
-            else:
-                yield data
-        while next_token:
-            content_string = copy.deepcopy(json.loads(payload.get('contentString')))
-            content_string.update({next_token_marker: next_token})
-            payload.update({'contentString': json.dumps(content_string)})
-            response, next_token = self._get_partial_response(payload, next_token_marker)
+        if not object_group:
+            yield response.json()
+        else:
             for data in response.json().get(object_group, []):
                 if object_type:
                     yield object_type(self, data)
                 else:
                     yield data
+        while next_token:
+            content_string = copy.deepcopy(json.loads(payload.get('contentString')))
+            content_string.update({next_token_marker: next_token})
+            payload.update({'contentString': json.dumps(content_string)})
+            response, next_token = self._get_partial_response(payload, next_token_marker)
+            if not object_group:
+                yield response.json()
+            else:
+                for data in response.json().get(object_group, []):
+                    if object_type:
+                        yield object_type(self, data)
+                    else:
+                        yield data
 
     def _get_partial_response(self, payload, next_token_marker):
         response = self.session.post(self.url, json=payload)
@@ -560,6 +605,37 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             raise ValueError(response.text)
         next_token = response.json().get(next_token_marker)
         return response, next_token
+
+    @property
+    def _update_data(self):
+        if self._update_data_ is None:
+            self._update_data_ = next(self._get_paginated_results(content_payload={},
+                                                                  target='getAvailableUpdates'))
+        return self._update_data_
+
+    @property
+    def baseline_update_available(self):
+        return self._update_data.get('BaselineUpdateAvailable')
+
+    @property
+    def guardrail_update_available(self):
+        return self._update_data.get('GuardrailUpdateAvailable')
+
+    @property
+    def landing_zone_update_available(self):
+        return self._update_data.get('LandingZoneUpdateAvailable')
+
+    @property
+    def service_landing_zone_version(self):
+        return self._update_data.get('ServiceLandingZoneVersion')
+
+    @property
+    def user_landing_zone_version(self):
+        return self._update_data.get('UserLandingZoneVersion')
+
+    @property
+    def landing_zone_version(self):
+        return self._update_data.get('UserLandingZoneVersion')
 
     @property
     def organizational_units(self):
@@ -776,6 +852,24 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
         """
         return self._filter_for_status('ERROR')
+
+    def get_accounts_with_available_updates(self):
+        """Retrieves the accounts that have available updates from control tower.
+
+        Returns:
+            accounts (Account): A list of account objects under control tower's control with available updates.
+
+        """
+        return [account for account in self.accounts if account.has_available_update]
+
+    def get_updated_accounts(self):
+        """Retrieves the accounts that have no available updates from control tower.
+
+        Returns:
+            accounts (Account): A list of account objects under control tower's control with no available updates.
+
+        """
+        return [account for account in self.accounts if not account.has_available_update]
 
     def get_changing_accounts(self):
         """Retrieves the under change accounts from control tower.
