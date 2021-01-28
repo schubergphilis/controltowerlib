@@ -383,17 +383,17 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
                      'ProvisionedProductName': self.name,
                      'ProvisioningArtifactId': self.provisioning_artifact_id,
                      'ProvisioningParameters': [{'Key': 'AccountName',
-                                                 'Value': self.name},
+                                                 'UsePreviousValue': True},
                                                 {'Key': 'AccountEmail',
-                                                 'Value': self.email},
+                                                 'UsePreviousValue': True},
                                                 {'Key': 'SSOUserFirstName',
-                                                 'Value': 'Control'},
+                                                 'UsePreviousValue': True},
                                                 {'Key': 'SSOUserLastName',
-                                                 'Value': 'Tower'},
+                                                 'UsePreviousValue': True},
                                                 {'Key': 'SSOUserEmail',
-                                                 'Value': self.sso_user_email},
+                                                 'UsePreviousValue': True},
                                                 {'Key': 'ManagedOrganizationalUnit',
-                                                 'Value': self.organizational_unit.name}]}
+                                                 'UsePreviousValue': True}]}
         response = self.service_catalog.update_provisioned_product(**arguments)
         return response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200
 
