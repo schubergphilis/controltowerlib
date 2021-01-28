@@ -378,21 +378,28 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
         self.detach_service_control_policy('FullAWSAccess')
 
     def update(self):
-        # FIX THIS TO ACTUALLY WORK
-        arguments = {'ProductId': self.service_catalog_product_id,
+        if not self.has_available_update:
+            return True
+        arguments = {'ProductId': self.control_tower._account_factory.product_id,
                      'ProvisionedProductName': self.name,
-                     'ProvisioningArtifactId': self.provisioning_artifact_id,
+                     'ProvisioningArtifactId': self.control_tower._active_artifact.get('Id'),
                      'ProvisioningParameters': [{'Key': 'AccountName',
+                                                 'Value': self.name,
                                                  'UsePreviousValue': True},
                                                 {'Key': 'AccountEmail',
+                                                 'Value': self.email,
                                                  'UsePreviousValue': True},
                                                 {'Key': 'SSOUserFirstName',
+                                                 'Value': 'Control',
                                                  'UsePreviousValue': True},
                                                 {'Key': 'SSOUserLastName',
+                                                 'Value': 'Tower',
                                                  'UsePreviousValue': True},
                                                 {'Key': 'SSOUserEmail',
+                                                 'Value': self.email,
                                                  'UsePreviousValue': True},
                                                 {'Key': 'ManagedOrganizationalUnit',
+                                                 'Value': self.organizational_unit.name,
                                                  'UsePreviousValue': True}]}
         response = self.service_catalog.update_provisioned_product(**arguments)
         return response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200
