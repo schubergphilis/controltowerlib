@@ -21,7 +21,7 @@
 #  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 #  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 #  DEALINGS IN THE SOFTWARE.
-#
+#  pylint: disable=too-many-lines
 
 """
 Main code for controltowerlib.
@@ -378,11 +378,17 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
         self.detach_service_control_policy('FullAWSAccess')
 
     def update(self):
+        """Updates the account in service catalog.
+
+        Returns:
+            True if the call succeeded False otherwise
+
+        """
         if not self.has_available_update:
             return True
-        arguments = {'ProductId': self.control_tower._account_factory.product_id,
+        arguments = {'ProductId': self.control_tower._account_factory.product_id,  # pylint: disable=protected-access
                      'ProvisionedProductName': self.name,
-                     'ProvisioningArtifactId': self.control_tower._active_artifact.get('Id'),
+                     'ProvisioningArtifactId': self.control_tower._active_artifact.get('Id'),  # pylint: disable=protected-access
                      'ProvisioningParameters': [{'Key': 'AccountName',
                                                  'Value': self.name,
                                                  'UsePreviousValue': True},
@@ -558,7 +564,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                    'region': region or self.region}
         return copy.deepcopy(payload)
 
-    def _get_paginated_results(self,  # pylint: disable=too-many-arguments, too-many-locals
+    def _get_paginated_results(self,  # pylint: disable=too-many-arguments
                                content_payload,
                                target,
                                object_group=None,
@@ -615,26 +621,32 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
     @property
     def baseline_update_available(self):
+        """Baseline update available."""
         return self._update_data.get('BaselineUpdateAvailable')
 
     @property
     def guardrail_update_available(self):
+        """Guardrail update available."""
         return self._update_data.get('GuardrailUpdateAvailable')
 
     @property
     def landing_zone_update_available(self):
+        """Landing Zone update available."""
         return self._update_data.get('LandingZoneUpdateAvailable')
 
     @property
     def service_landing_zone_version(self):
+        """Service landing zone version."""
         return self._update_data.get('ServiceLandingZoneVersion')
 
     @property
     def user_landing_zone_version(self):
+        """User landing zone version."""
         return self._update_data.get('UserLandingZoneVersion')
 
     @property
     def landing_zone_version(self):
+        """Landing zone version."""
         return self._update_data.get('UserLandingZoneVersion')
 
     @property
