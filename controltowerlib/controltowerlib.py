@@ -136,6 +136,59 @@ class ServiceControlPolicy:
         return self._data.get('Type')
 
 
+class GuardRail:  # pylint: disable=too-many-public-methods
+    """Models the guard rail data."""
+
+    def __init__(self, control_tower, data):
+        self.control_tower = control_tower
+        self._data_ = data
+
+    @property
+    def _data(self):
+        """The data of the guard rail as returned by the api."""
+        return self._data_
+
+    @property
+    def behavior(self):
+        """Behavior."""
+        return self._data_.get('Behavior')
+
+    @property
+    def category(self):
+        """Category."""
+        return self._data_.get('Category')
+
+    @property
+    def description(self):
+        """Description."""
+        return self._data_.get('Description')
+
+    @property
+    def display_name(self):
+        """DisplayName."""
+        return self._data_.get('DisplayName')
+
+    @property
+    def name(self):
+        """Name."""
+        return self._data_.get('Name')
+
+    @property
+    def provider(self):
+        """Provider."""
+        return self._data_.get('Provider')
+
+    @property
+    def regional_preference(self):
+        """Regional preference."""
+        return self._data_.get('RegionalPreference')
+
+    @property
+    def type(self):
+        """Type."""
+        return self._data_.get('Type')
+
+
 class CoreAccount(LoggerMixin):  # pylint: disable=too-many-public-methods
     """Models the core landing zone account data."""
 
@@ -1158,5 +1211,12 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
     def enabled_guard_rails(self):
         output = []
         for result in self._get_paginated_results(content_payload={}, target='listEnabledGuardrails'):
-            output.extend(result.get('EnabledGuardrailList'))
+            output.extend([GuardRail(self, data) for data in result.get('EnabledGuardrailList')])
+        return output
+
+    @property
+    def guard_rails(self):
+        output = []
+        for result in self._get_paginated_results(content_payload={}, target='listGuardrails'):
+            output.extend([GuardRail(self, data) for data in result.get('GuardrailList')])
         return output
