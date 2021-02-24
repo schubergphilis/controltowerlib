@@ -40,6 +40,7 @@ import boto3
 import botocore
 from awsauthenticationlib import AwsAuthenticator
 from opnieuw import retry
+from time import sleep
 
 from .controltowerlibexceptions import (UnsupportedTarget,
                                         OUCreating,
@@ -176,13 +177,14 @@ class CoreAccount(LoggerMixin):  # pylint: disable=too-many-public-methods
 class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-methods
     """Models the account data."""
 
-    def __init__(self, control_tower, data):
+    def __init__(self, control_tower, data, info_polling_interval=30):
         self.control_tower = control_tower
         self.service_catalog = control_tower.service_catalog
         self.organizations = control_tower.organizations
         self._data_ = data
         self._service_catalog_data_ = None
         self._record_data_ = None
+        self._info_polling_interval = info_polling_interval
 
     @property
     def _data(self):
@@ -400,9 +402,6 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
             response (dict): The response from the api of the termination request.
 
         """
-        # if not self.status == 'ERROR':
-        #     self.logger.error('Cannot terminate products that are not in error state!')
-        #     return {}
         return self.service_catalog.terminate_provisioned_product(ProvisionedProductId=self.service_catalog_id)
 
     def delete(self):
@@ -411,7 +410,9 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
         if not suspended_ou:
             raise NoSuspendedOU(self.control_tower.suspended_ou_name)
         self._terminate()
-        # here we need to block until the removal is complete.
+        while self.control_tower.busy:
+            self.logger.debug('Waiting for control tower to terminate the account...')
+            sleep(self._info_polling_interval)
         self.organizations.move_account(AccountId=self.id,
                                         SourceParentId=self.control_tower.root_ou.id,
                                         DestinationParentId=suspended_ou.id)
@@ -1145,7 +1146,8 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         self.logger.debug('Trying to get the drift messages of the landing zone with payload "%s"', payload)
         response = self.session.post(self.url, json=payload)
         if not response.ok:
-            self.logger.error('Failed to get the drift message of the landing zone with response status "%s" and response text "%s"',
+            self.logger.error('Failed to get the drift message of the landing zone with response status "%s" and '
+                              'response text "%s"',
                               response.status_code, response.text)
             return {}
         return response.json().get('DriftDetails')
