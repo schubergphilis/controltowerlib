@@ -36,12 +36,12 @@ import json
 import logging
 import time
 from functools import lru_cache
+from time import sleep
 
 import boto3
 import botocore
 from awsauthenticationlib import AwsAuthenticator
 from opnieuw import retry
-from time import sleep
 
 from .controltowerlibexceptions import (UnsupportedTarget,
                                         OUCreating,
@@ -136,7 +136,7 @@ class ServiceControlPolicy:
         return self._data.get('Type')
 
 
-class GuardRail:  # pylint: disable=too-many-public-methods
+class GuardRail:
     """Models the guard rail data."""
 
     def __init__(self, control_tower, data):
@@ -189,7 +189,7 @@ class GuardRail:  # pylint: disable=too-many-public-methods
         return self._data_.get('Type')
 
 
-class CoreAccount(LoggerMixin):  # pylint: disable=too-many-public-methods
+class CoreAccount:
     """Models the core landing zone account data."""
 
     def __init__(self, control_tower, account_label, data):
@@ -218,7 +218,7 @@ class CoreAccount(LoggerMixin):  # pylint: disable=too-many-public-methods
         return self._data_.get('AccountId')
 
     @property
-    def core_resource_mappings(self):  # pylint: disable=invalid-name
+    def core_resource_mappings(self):
         """Core resource mappings."""
         return self._data_.get('CoreResourceMappings')
 
@@ -618,6 +618,12 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
     @property
     def core_accounts(self):
+        """The core accounts of the landing zone.
+
+        Returns:
+            core_accounts (list): A list of the primary, logging and security account.
+
+        """
         if self._core_accounts is None:
             core_accounts = []
             for account_type in self.core_account_types:
@@ -625,7 +631,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                                                 target='describeCoreService')
                 response = self.session.post(self.url, json=payload)
                 if not response.ok:
-                    raise ServiceCallFailed(f'Service call failed with payload %s', payload)
+                    raise ServiceCallFailed(f'Service call failed with payload {payload}')
                 core_accounts.append(CoreAccount(self, account_type, response.json()))
             self._core_accounts = core_accounts
         return self._core_accounts
@@ -1138,8 +1144,15 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                      if scp.name == name), None)
 
     def update(self):
+        """Updates the control tower to the latest version.
+
+        Returns:
+            bool: True on success, False on failure.
+
+        """
         if not self.landing_zone_update_available:
-            self.logger.warning(f'Landing zone does not seem to need update, is at version {self.landing_zone_version}')
+            self.logger.warning('Landing zone does not seem to need update, is at version %s',
+                                self.landing_zone_version)
             return False
         log_account = next((account for account in self.core_accounts if account.label == 'LOGGING'), None)
         if not log_account:
@@ -1162,23 +1175,28 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
     @property
     def busy(self):
+        """Busy."""
         return any([self.status == 'IN_PROGRESS',
                     self.get_changing_accounts()])
 
     @property
     def status(self):
+        """Status."""
         return self._get_status().get('LandingZoneStatus')
 
     @property
     def percentage_complete(self):
+        """Percentage complete."""
         return self._get_status().get('PercentageComplete')
 
     @property
     def deploying_messages(self):
+        """Deploying messages."""
         return self._get_status().get('Messages')
 
     @property
     def region_metadata_list(self):
+        """Region metadata list."""
         return self._get_status().get('RegionMetadataList')
 
     @lru_cache(maxsize=2)
@@ -1196,6 +1214,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
     @property
     def drift_messages(self):
+        """Drift messages."""
         payload = self._get_api_payload(content_string={},
                                         target='listDriftDetails')
         self.logger.debug('Trying to get the drift messages of the landing zone with payload "%s"', payload)
@@ -1209,6 +1228,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
     @property
     def enabled_guard_rails(self):
+        """Enabled guard rails."""
         output = []
         for result in self._get_paginated_results(content_payload={}, target='listEnabledGuardrails'):
             output.extend([GuardRail(self, data) for data in result.get('EnabledGuardrailList')])
@@ -1216,6 +1236,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
     @property
     def guard_rails(self):
+        """Guard rails."""
         output = []
         for result in self._get_paginated_results(content_payload={}, target='listGuardrails'):
             output.extend([GuardRail(self, data) for data in result.get('GuardrailList')])
