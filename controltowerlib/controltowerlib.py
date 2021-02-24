@@ -35,6 +35,7 @@ import copy
 import json
 import logging
 import time
+from functools import lru_cache
 
 import boto3
 import botocore
@@ -1127,6 +1128,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
     def region_metadata_list(self):
         return self._get_status().get('RegionMetadataList')
 
+    @lru_cache(maxsize=2)
     def _get_status(self):
         payload = self._get_api_payload(content_string={},
                                         target='getLandingZoneStatus')
