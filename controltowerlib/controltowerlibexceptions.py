@@ -68,3 +68,7 @@ class ServiceCallFailed(Exception):
 
 class ControlTowerBusy(Exception):
     """The control tower is already executing some action."""
+
+
+class ControlTowerNotDeployed(Exception):
+    """The control tower is deployed at all."""

@@ -35,7 +35,7 @@ import copy
 import json
 import logging
 import time
-from functools import lru_cache
+from functools import lru_cache, wraps
 from time import sleep
 
 import boto3
@@ -49,7 +49,8 @@ from .controltowerlibexceptions import (UnsupportedTarget,
                                         NonExistentSCP,
                                         NoSuspendedOU,
                                         ServiceCallFailed,
-                                        ControlTowerBusy)
+                                        ControlTowerBusy,
+                                        ControlTowerNotDeployed)
 
 __author__ = '''Costas Tyfoxylos <ctyfoxylos@schubergphilis.com>'''
 __docformat__ = '''google'''
@@ -617,9 +618,24 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          'listGuardrailViolations',
                          'getCatastrophicDrift',
                          'getGuardrailComplianceStatus',
-                         'describeAccountFactoryConfig'
+                         'describeAccountFactoryConfig',
+                         'performPreLaunchChecks'
                          ]
     core_account_types = ['PRIMARY', 'LOGGING', 'SECURITY']
+
+    def validate_availability(method):
+        @wraps(method)
+        def wrap(*args, **kwargs):
+            logger = logging.getLogger(f'{LOGGER_BASENAME}.validation_decorator')
+            contol_tower_instance = args[0]
+            logger.debug(f'Decorating method: {method}')
+            if not contol_tower_instance.is_deployed:
+                raise ControlTowerNotDeployed
+            if contol_tower_instance.busy:
+                raise ControlTowerBusy
+            output = method(*args, **kwargs)
+            return output
+        return wrap
 
     def __init__(self, arn, settling_time=60, suspended_ou_name='Suspended'):
         self.aws_authenticator = AwsAuthenticator(arn)
@@ -627,8 +643,9 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         self.organizations = boto3.client('organizations', **self.aws_authenticator.assumed_role_credentials)
         self.session = self._get_authenticated_session()
         self._region = None
+        self._is_deployed = None
         self.url = f'https://{self.region}.console.aws.amazon.com/controltower/api/controltower'
-        self._account_factory = self._get_account_factory(self.service_catalog)
+        self._account_factory = self._get_account_factory(self.service_catalog) if self.is_deployed else None
         self.settling_time = settling_time
         self.suspended_ou_name = suspended_ou_name
         self._root_ou = None
@@ -636,7 +653,30 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         self._core_accounts = None
 
     @property
+    def is_deployed(self):
+        """The deployment status of control tower."""
+        if any([self._is_deployed is None,
+                not self._is_deployed]):
+            caller_region = self.aws_authenticator.region
+            url = f'https://{caller_region}.console.aws.amazon.com/controltower/api/controltower'
+            payload = self._get_api_payload(content_string={},
+                                            target='getLandingZoneStatus',
+                                            region=caller_region)
+            self.logger.debug('Trying to get the deployed status of the landing zone with payload "%s"', payload)
+            response = self.session.post(url, json=payload)
+            if not response.ok:
+                self.logger.error('Failed to get the deployed status of the landing zone with response status '
+                                  '"%s" and response text "%s"',
+                                  response.status_code, response.text)
+                raise ServiceCallFailed(payload)
+            self._is_deployed = response.json().get('LandingZoneStatus') != 'NOT_STARTED'
+        return self._is_deployed
+
+    @property
     def region(self):
+        if not self.is_deployed:
+            self._region = self.aws_authenticator.region
+            return self._region
         if self._region is None:
             caller_region = self.aws_authenticator.region
             url = f'https://{caller_region}.console.aws.amazon.com/controltower/api/controltower'
@@ -648,6 +688,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return self._region
 
     @property
+    @validate_availability
     def core_accounts(self):
         """The core accounts of the landing zone.
 
@@ -668,6 +709,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return self._core_accounts
 
     @property
+    @validate_availability
     def root_ou(self):
         """The root ou of control tower.
 
@@ -780,36 +822,43 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return self._update_data_
 
     @property
+    @validate_availability
     def baseline_update_available(self):
         """Baseline update available."""
         return self._update_data.get('BaselineUpdateAvailable')
 
     @property
+    @validate_availability
     def guardrail_update_available(self):
         """Guardrail update available."""
         return self._update_data.get('GuardrailUpdateAvailable')
 
     @property
+    @validate_availability
     def landing_zone_update_available(self):
         """Landing Zone update available."""
         return self._update_data.get('LandingZoneUpdateAvailable')
 
     @property
+    @validate_availability
     def service_landing_zone_version(self):
         """Service landing zone version."""
         return self._update_data.get('ServiceLandingZoneVersion')
 
     @property
+    @validate_availability
     def user_landing_zone_version(self):
         """User landing zone version."""
         return self._update_data.get('UserLandingZoneVersion')
 
     @property
+    @validate_availability
     def landing_zone_version(self):
         """Landing zone version."""
         return self._update_data.get('UserLandingZoneVersion')
 
     @property
+    @validate_availability
     def organizational_units(self):
         """The organizational units under control tower.
 
@@ -824,6 +873,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                                            object_group='ManagedOrganizationalUnitList',
                                            next_token_marker='NextToken')
 
+    @validate_availability
     def register_organizations_ou(self, name):
         """Registers an Organizations OU under control tower.
 
@@ -843,6 +893,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             return False
         return self._register_org_ou_in_control_tower(org_ou)
 
+    @validate_availability
     def create_organizational_unit(self, name):
         """Creates a Control Tower managed organizational unit.
 
@@ -887,6 +938,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         self.logger.debug('Successfully moved management of OU "%s" under Control Tower', org_ou.name)
         return response.ok
 
+    @validate_availability
     def delete_organizational_unit(self, name):
         """Deletes a Control Tower managed organizational unit.
 
@@ -915,6 +967,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         self.logger.debug(response)
         return bool(response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200)
 
+    @validate_availability
     def get_organizational_unit_by_name(self, name):
         """Gets a Control Tower managed Organizational Unit by name.
 
@@ -927,6 +980,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """
         return next((ou for ou in self.organizational_units if ou.name == name), None)
 
+    @validate_availability
     def get_organizational_unit_by_id(self, id_):
         """Gets a Control Tower managed Organizational Unit by id.
 
@@ -940,6 +994,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return next((ou for ou in self.organizational_units if ou.id == id_), None)
 
     @property
+    @validate_availability
     def organizations_ous(self):
         """The organizational units under Organizations.
 
@@ -951,6 +1006,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return [OrganizationsOU(data)
                 for data in response.get('OrganizationalUnits', [])]
 
+    @validate_availability
     def get_organizations_ou_by_name(self, name):
         """Gets an Organizations managed Organizational Unit by name.
 
@@ -963,6 +1019,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """
         return next((ou for ou in self.organizations_ous if ou.name == name), None)
 
+    @validate_availability
     def get_organizations_ou_by_id(self, id_):
         """Gets an Organizations managed Organizational Unit by id.
 
@@ -975,6 +1032,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """
         return next((ou for ou in self.organizations_ous if ou.id == id_), None)
 
+    @validate_availability
     def get_organizations_ou_by_arn(self, arn):
         """Gets an Organizations managed Organizational Unit by arn.
 
@@ -988,6 +1046,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return next((ou for ou in self.organizations_ous if ou.arn == arn), None)
 
     @property
+    @validate_availability
     def accounts(self):
         """The accounts under control tower.
 
@@ -1007,6 +1066,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return [data for data in products.get('ProvisionedProducts', [])
                 if data.get('Type', '') == 'CONTROL_TOWER_ACCOUNT']
 
+    @validate_availability
     def get_available_accounts(self):
         """Retrieves the available accounts from control tower.
 
@@ -1016,6 +1076,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """
         return self._filter_for_status('AVAILABLE')
 
+    @validate_availability
     def get_erroring_accounts(self):
         """Retrieves the erroring accounts from control tower.
 
@@ -1025,6 +1086,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """
         return self._filter_for_status('ERROR')
 
+    @validate_availability
     def get_accounts_with_available_updates(self):
         """Retrieves the accounts that have available updates from control tower.
 
@@ -1034,6 +1096,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """
         return [account for account in self.accounts if account.has_available_update]
 
+    @validate_availability
     def get_updated_accounts(self):
         """Retrieves the accounts that have no available updates from control tower.
 
@@ -1068,6 +1131,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return next((data for data in self._service_catalog_accounts_data
                      if data.get('PhysicalId') == account_id), None)
 
+    @validate_availability
     def get_account_by_name(self, name):
         """Retrieves an account by name.
 
@@ -1077,6 +1141,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """
         return self._get_by_attribute('name', name)
 
+    @validate_availability
     def get_account_by_id(self, id_):
         """Retrieves an account by id.
 
@@ -1086,6 +1151,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """
         return self._get_by_attribute('id', id_)
 
+    @validate_availability
     def get_account_by_arn(self, arn):
         """Retrieves an account by arn.
 
@@ -1096,6 +1162,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return self._get_by_attribute('arn', arn)
 
     @retry(retry_on_exceptions=OUCreating, max_calls_total=7, retry_window_after_first_call_in_seconds=60)
+    @validate_availability
     def create_account(self,  # pylint: disable=too-many-arguments
                        account_name,
                        account_email,
@@ -1151,6 +1218,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200
 
     @property
+    @validate_availability
     def service_control_policies(self):
         """The service control policies under organization.
 
@@ -1161,6 +1229,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return [ServiceControlPolicy(data)
                 for data in self.organizations.list_policies(Filter='SERVICE_CONTROL_POLICY').get('Policies', [])]
 
+    @validate_availability
     def get_service_control_policy_by_name(self, name):
         """Retrieves a service control policy by name.
 
@@ -1174,6 +1243,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return next((scp for scp in self.service_control_policies
                      if scp.name == name), None)
 
+    @validate_availability
     def update(self):
         """Updates the control tower to the latest version.
 
@@ -1244,6 +1314,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return response.json()
 
     @property
+    @validate_availability
     def drift_messages(self):
         """Drift messages."""
         payload = self._get_api_payload(content_string={},
@@ -1258,6 +1329,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return response.json().get('DriftDetails')
 
     @property
+    @validate_availability
     def enabled_guard_rails(self):
         """Enabled guard rails."""
         output = []
@@ -1266,6 +1338,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return output
 
     @property
+    @validate_availability
     def guard_rails(self):
         """Guard rails."""
         output = []
@@ -1274,6 +1347,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return output
 
     @property
+    @validate_availability
     def guard_rails_violations(self):
         """List guard rails violations."""
         output = []
@@ -1282,6 +1356,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return output
 
     @property
+    @validate_availability
     def catastrophic_drift(self):
         """List of catastrophic drift."""
         output = []
