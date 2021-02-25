@@ -1223,7 +1223,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             self.logger.error('Failed to get the drift message of the landing zone with response status "%s" and '
                               'response text "%s"',
                               response.status_code, response.text)
-            return {}
+            return []
         return response.json().get('DriftDetails')
 
     @property
