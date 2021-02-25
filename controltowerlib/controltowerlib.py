@@ -193,7 +193,7 @@ class GuardRail(LoggerMixin):
     @property
     def compliancy_status(self):
         """Compliancy status."""
-        payload = self.control_tower._get_api_payload(content_string={'GuardrailName': self.name},
+        payload = self.control_tower._get_api_payload(content_string={'GuardrailName': self.name},  # pylint: disable=protected-access
                                                       target='getGuardrailComplianceStatus')
         self.logger.debug('Trying to get the compliancy status with payload "%s"', payload)
         response = self.control_tower.session.post(self.control_tower.url, json=payload)
@@ -624,17 +624,19 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          ]
     core_account_types = ['PRIMARY', 'LOGGING', 'SECURITY']
 
-    def validate_availability(method):
+    def validate_availability(method):  # pylint: disable=no-self-argument
+        """Validation decorator."""
         @wraps(method)
         def wrap(*args, **kwargs):
+            """Inner wrapper decorator."""
             logger = logging.getLogger(f'{LOGGER_BASENAME}.validation_decorator')
             contol_tower_instance = args[0]
-            logger.debug(f'Decorating method: {method}')
+            logger.debug('Decorating method: %s', method)
             if not contol_tower_instance.is_deployed:
                 raise ControlTowerNotDeployed
             if contol_tower_instance.busy:
                 raise ControlTowerBusy
-            output = method(*args, **kwargs)
+            output = method(*args, **kwargs)  # pylint: disable=not-callable
             return output
         return wrap
 
@@ -675,6 +677,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
     @property
     def region(self):
+        """Region."""
         if not self.is_deployed:
             self._region = self.aws_authenticator.region
             return self._region
@@ -1353,7 +1356,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """List guard rails violations."""
         output = []
         for result in self._get_paginated_results(content_payload={}, target='listGuardrailViolations'):
-            output.extend([data for data in result.get('GuardrailViolationList')])
+            output.extend(result.get('GuardrailViolationList'))
         return output
 
     @property
@@ -1400,12 +1403,12 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
         """
         return NotImplemented
-        if self.is_deployed:
-            self.logger.warning('Control tower does not seem to need deploying, already deployed.')
-            return True
-        validation = self._pre_deploy_check()
-        if not all([list(entry.values()).pop().get('Result') == 'SUCCESS' for entry in validation]):
-            raise PreDeployValidationFailed(validation)
+        # if self.is_deployed:
+        #     self.logger.warning('Control tower does not seem to need deploying, already deployed.')
+        #     return True
+        # validation = self._pre_deploy_check()
+        # if not all([list(entry.values()).pop().get('Result') == 'SUCCESS' for entry in validation]):
+        #     raise PreDeployValidationFailed(validation)
         # validate that the emails are not used anywhere.
         # {"headers": {"X-Amz-User-Agent": "aws-sdk-js/2.528.0 promise", "Content-Type": "application/x-amz-json-1.1",
         #              "X-Amz-Target": "AWSBlackbeardService.GetAccountInfo"}, "path": "/", "method": "POST",
@@ -1427,17 +1430,17 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         #                              {"Region": "eu-north-1", "RegionConfigurationStatus": "DISABLED"}
         #
 
-        payload = self._get_api_payload(content_string={'HomeRegion': self.region,
-                                                        'LogAccountEmail': logging_account_email,
-                                                        'SecurityAccountEmail': security_account_email},
-                                        target='setupLandingZone')
-        self.logger.debug('Trying to deploy control tower with payload "%s"', payload)
-        headers = {'Referer':
-                       f'https://{self.region}.console.aws.amazon.com/controltower/home/setup?region={self.region}'}
-        response = self.session.post(self.url, headers=headers, json=payload)
-        if not response.ok:
-            self.logger.error('Failed to deploy control tower with response status "%s" and response text "%s"',
-                              response.status_code, response.text)
-            return False
-        self.logger.debug('Successfully started deploying control tower.')
-        return True
+        # payload = self._get_api_payload(content_string={'HomeRegion': self.region,
+        #                                                 'LogAccountEmail': logging_account_email,
+        #                                                 'SecurityAccountEmail': security_account_email},
+        #                                 target='setupLandingZone')
+        # self.logger.debug('Trying to deploy control tower with payload "%s"', payload)
+        # headers = {'Referer':
+        #                f'https://{self.region}.console.aws.amazon.com/controltower/home/setup?region={self.region}'}
+        # response = self.session.post(self.url, headers=headers, json=payload)
+        # if not response.ok:
+        #     self.logger.error('Failed to deploy control tower with response status "%s" and response text "%s"',
+        #                       response.status_code, response.text)
+        #     return False
+        # self.logger.debug('Successfully started deploying control tower.')
+        # return True
