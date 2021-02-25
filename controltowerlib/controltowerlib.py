@@ -35,6 +35,8 @@ import copy
 import json
 import logging
 import time
+from functools import lru_cache
+from time import sleep
 
 import boto3
 import botocore
@@ -45,7 +47,9 @@ from .controltowerlibexceptions import (UnsupportedTarget,
                                         OUCreating,
                                         NoServiceCatalogAccess,
                                         NonExistentSCP,
-                                        NoSuspendedOU)
+                                        NoSuspendedOU,
+                                        ServiceCallFailed,
+                                        ControlTowerBusy)
 
 __author__ = '''Costas Tyfoxylos <ctyfoxylos@schubergphilis.com>'''
 __docformat__ = '''google'''
@@ -132,16 +136,109 @@ class ServiceControlPolicy:
         return self._data.get('Type')
 
 
+class GuardRail:
+    """Models the guard rail data."""
+
+    def __init__(self, control_tower, data):
+        self.control_tower = control_tower
+        self._data_ = data
+
+    @property
+    def _data(self):
+        """The data of the guard rail as returned by the api."""
+        return self._data_
+
+    @property
+    def behavior(self):
+        """Behavior."""
+        return self._data_.get('Behavior')
+
+    @property
+    def category(self):
+        """Category."""
+        return self._data_.get('Category')
+
+    @property
+    def description(self):
+        """Description."""
+        return self._data_.get('Description')
+
+    @property
+    def display_name(self):
+        """DisplayName."""
+        return self._data_.get('DisplayName')
+
+    @property
+    def name(self):
+        """Name."""
+        return self._data_.get('Name')
+
+    @property
+    def provider(self):
+        """Provider."""
+        return self._data_.get('Provider')
+
+    @property
+    def regional_preference(self):
+        """Regional preference."""
+        return self._data_.get('RegionalPreference')
+
+    @property
+    def type(self):
+        """Type."""
+        return self._data_.get('Type')
+
+
+class CoreAccount:
+    """Models the core landing zone account data."""
+
+    def __init__(self, control_tower, account_label, data):
+        self.control_tower = control_tower
+        self._label = account_label
+        self._data_ = data
+
+    @property
+    def _data(self):
+        """The data of the account as returned by the api."""
+        return self._data_
+
+    @property
+    def label(self):
+        """Account label."""
+        return self._label
+
+    @property
+    def email(self):
+        """Email."""
+        return self._data_.get('AccountEmail')
+
+    @property
+    def id(self):  # pylint: disable=invalid-name
+        """Id."""
+        return self._data_.get('AccountId')
+
+    @property
+    def core_resource_mappings(self):
+        """Core resource mappings."""
+        return self._data_.get('CoreResourceMappings')
+
+    @property
+    def stack_set_arn(self):
+        """Stack set arn."""
+        return self._data_.get('StackSetARN')
+
+
 class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-methods
     """Models the account data."""
 
-    def __init__(self, control_tower, data):
+    def __init__(self, control_tower, data, info_polling_interval=30):
         self.control_tower = control_tower
         self.service_catalog = control_tower.service_catalog
         self.organizations = control_tower.organizations
         self._data_ = data
         self._service_catalog_data_ = None
         self._record_data_ = None
+        self._info_polling_interval = info_polling_interval
 
     @property
     def _data(self):
@@ -359,9 +456,6 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
             response (dict): The response from the api of the termination request.
 
         """
-        # if not self.status == 'ERROR':
-        #     self.logger.error('Cannot terminate products that are not in error state!')
-        #     return {}
         return self.service_catalog.terminate_provisioned_product(ProvisionedProductId=self.service_catalog_id)
 
     def delete(self):
@@ -370,7 +464,9 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
         if not suspended_ou:
             raise NoSuspendedOU(self.control_tower.suspended_ou_name)
         self._terminate()
-        # here we need to block until the removal is complete.
+        while self.control_tower.busy:
+            self.logger.debug('Waiting for control tower to terminate the account...')
+            sleep(self._info_polling_interval)
         self.organizations.move_account(AccountId=self.id,
                                         SourceParentId=self.control_tower.root_ou.id,
                                         DestinationParentId=suspended_ou.id)
@@ -386,6 +482,8 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
         """
         if not self.has_available_update:
             return True
+        if self.control_tower.busy:
+            raise ControlTowerBusy
         arguments = {'ProductId': self.control_tower._account_factory.product_id,  # pylint: disable=protected-access
                      'ProvisionedProductName': self.name,
                      'ProvisioningArtifactId': self.control_tower._active_artifact.get('Id'),  # pylint: disable=protected-access
@@ -492,20 +590,65 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          'getGuardrailComplianceStatus',
                          'describeManagedOrganizationalUnit',
                          'listGuardrailsForTarget',
-                         'getAvailableUpdates']
+                         'getAvailableUpdates',
+                         'describeCoreService',
+                         'getAccountInfo',
+                         'listEnabledGuardrails',
+                         'listGuardrails',
+                         'listOrganizationalUnitsForParent',
+                         'listDriftDetails',
+                         'getLandingZoneStatus',
+                         'setupLandingZone',
+                         'getHomeRegion',
+                         'listGuardrailViolations'
+                         ]
+    core_account_types = ['PRIMARY', 'LOGGING', 'SECURITY']
 
     def __init__(self, arn, settling_time=60, suspended_ou_name='Suspended'):
         self.aws_authenticator = AwsAuthenticator(arn)
         self.service_catalog = boto3.client('servicecatalog', **self.aws_authenticator.assumed_role_credentials)
         self.organizations = boto3.client('organizations', **self.aws_authenticator.assumed_role_credentials)
-        self.region = self.aws_authenticator.region
-        self._account_factory = self._get_account_factory(self.service_catalog)
-        self.url = f'https://{self.region}.console.aws.amazon.com/controltower/api/controltower'
         self.session = self._get_authenticated_session()
+        self._region = None
+        self.url = f'https://{self.region}.console.aws.amazon.com/controltower/api/controltower'
+        self._account_factory = self._get_account_factory(self.service_catalog)
         self.settling_time = settling_time
         self.suspended_ou_name = suspended_ou_name
         self._root_ou = None
         self._update_data_ = None
+        self._core_accounts = None
+
+    @property
+    def region(self):
+        if self._region is None:
+            caller_region = self.aws_authenticator.region
+            url = f'https://{caller_region}.console.aws.amazon.com/controltower/api/controltower'
+            payload = self._get_api_payload(content_string={}, target='getHomeRegion', region=caller_region)
+            response = self.session.post(url, json=payload)
+            if not response.ok:
+                raise ServiceCallFailed(payload)
+            self._region = response.json().get('HomeRegion')
+        return self._region
+
+    @property
+    def core_accounts(self):
+        """The core accounts of the landing zone.
+
+        Returns:
+            core_accounts (list): A list of the primary, logging and security account.
+
+        """
+        if self._core_accounts is None:
+            core_accounts = []
+            for account_type in self.core_account_types:
+                payload = self._get_api_payload(content_string={'AccountType': account_type},
+                                                target='describeCoreService')
+                response = self.session.post(self.url, json=payload)
+                if not response.ok:
+                    raise ServiceCallFailed(f'Service call failed with payload {payload}')
+                core_accounts.append(CoreAccount(self, account_type, response.json()))
+            self._core_accounts = core_accounts
+        return self._core_accounts
 
     @property
     def root_ou(self):
@@ -1013,3 +1156,110 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """
         return next((scp for scp in self.service_control_policies
                      if scp.name == name), None)
+
+    def update(self):
+        """Updates the control tower to the latest version.
+
+        Returns:
+            bool: True on success, False on failure.
+
+        """
+        if not self.landing_zone_update_available:
+            self.logger.warning('Landing zone does not seem to need update, is at version %s',
+                                self.landing_zone_version)
+            return False
+        log_account = next((account for account in self.core_accounts if account.label == 'LOGGING'), None)
+        if not log_account:
+            raise ServiceCallFailed('Could not retrieve logging account to get the email.')
+        security_account = next((account for account in self.core_accounts if account.label == 'SECURITY'), None)
+        if not security_account:
+            raise ServiceCallFailed('Could not retrieve security account to get the email.')
+        payload = self._get_api_payload(content_string={'HomeRegion': self.region,
+                                                        'LogAccountEmail': log_account.email,
+                                                        'SecurityAccountEmail': security_account.email},
+                                        target='setupLandingZone')
+        self.logger.debug('Trying to update the landing zone with payload "%s"', payload)
+        response = self.session.post(self.url, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to update the landing zone with response status "%s" and response text "%s"',
+                              response.status_code, response.text)
+            return False
+        self.logger.debug('Successfully started updating landing zone')
+        return True
+
+    @property
+    def busy(self):
+        """Busy."""
+        return any([self.status == 'IN_PROGRESS',
+                    self.get_changing_accounts()])
+
+    @property
+    def status(self):
+        """Status."""
+        return self._get_status().get('LandingZoneStatus')
+
+    @property
+    def percentage_complete(self):
+        """Percentage complete."""
+        return self._get_status().get('PercentageComplete')
+
+    @property
+    def deploying_messages(self):
+        """Deploying messages."""
+        return self._get_status().get('Messages')
+
+    @property
+    def region_metadata_list(self):
+        """Region metadata list."""
+        return self._get_status().get('RegionMetadataList')
+
+    @lru_cache(maxsize=2)
+    def _get_status(self):
+        payload = self._get_api_payload(content_string={},
+                                        target='getLandingZoneStatus')
+        self.logger.debug('Trying to get the landing zone status with payload "%s"', payload)
+        response = self.session.post(self.url, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to get the landing zone status with response status "%s" and response text "%s"',
+                              response.status_code, response.text)
+            return {}
+        self.logger.debug('Successfully got landing zone status.')
+        return response.json()
+
+    @property
+    def drift_messages(self):
+        """Drift messages."""
+        payload = self._get_api_payload(content_string={},
+                                        target='listDriftDetails')
+        self.logger.debug('Trying to get the drift messages of the landing zone with payload "%s"', payload)
+        response = self.session.post(self.url, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to get the drift message of the landing zone with response status "%s" and '
+                              'response text "%s"',
+                              response.status_code, response.text)
+            return []
+        return response.json().get('DriftDetails')
+
+    @property
+    def enabled_guard_rails(self):
+        """Enabled guard rails."""
+        output = []
+        for result in self._get_paginated_results(content_payload={}, target='listEnabledGuardrails'):
+            output.extend([GuardRail(self, data) for data in result.get('EnabledGuardrailList')])
+        return output
+
+    @property
+    def guard_rails(self):
+        """Guard rails."""
+        output = []
+        for result in self._get_paginated_results(content_payload={}, target='listGuardrails'):
+            output.extend([GuardRail(self, data) for data in result.get('GuardrailList')])
+        return output
+
+    @property
+    def guard_rails_violations(self):
+        """List guard rails violations."""
+        output = []
+        for result in self._get_paginated_results(content_payload={}, target='listGuardrailViolations'):
+            output.extend([data for data in result.get('GuardrailViolationList')])
+        return output

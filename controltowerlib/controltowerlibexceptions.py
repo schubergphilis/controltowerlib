@@ -60,3 +60,11 @@ class NonExistentSCP(Exception):
 
 class NoSuspendedOU(Exception):
     """The suspended ou has not been created."""
+
+
+class ServiceCallFailed(Exception):
+    """The call to the service has failed."""
+
+
+class ControlTowerBusy(Exception):
+    """The control tower is already executing some action."""
