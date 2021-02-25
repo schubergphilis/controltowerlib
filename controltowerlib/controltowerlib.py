@@ -616,7 +616,8 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          'getHomeRegion',
                          'listGuardrailViolations',
                          'getCatastrophicDrift',
-                         'getGuardrailComplianceStatus'
+                         'getGuardrailComplianceStatus',
+                         'describeAccountFactoryConfig'
                          ]
     core_account_types = ['PRIMARY', 'LOGGING', 'SECURITY']
 
@@ -1287,3 +1288,17 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         for result in self._get_paginated_results(content_payload={}, target='getCatastrophicDrift'):
             output.extend(result.get('DriftDetails'))
         return output
+
+    @property
+    def _account_factory_config(self):
+        """The config of the account factory."""
+        payload = self._get_api_payload(content_string={},
+                                        target='describeAccountFactoryConfig')
+        self.logger.debug('Trying to get the account factory config of the landing zone with payload "%s"', payload)
+        response = self.session.post(self.url, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to get the the account factory config of the landing zone with response status '
+                              '"%s" and response text "%s"',
+                              response.status_code, response.text)
+            return {}
+        return response.json().get('AccountFactoryConfig')
