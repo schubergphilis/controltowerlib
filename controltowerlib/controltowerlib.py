@@ -1399,12 +1399,34 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             bool: True on success, False on failure.
 
         """
+        return NotImplemented
         if self.is_deployed:
             self.logger.warning('Control tower does not seem to need deploying, already deployed.')
             return True
         validation = self._pre_deploy_check()
         if not all([list(entry.values()).pop().get('Result') == 'SUCCESS' for entry in validation]):
             raise PreDeployValidationFailed(validation)
+        # validate that the emails are not used anywhere.
+        # {"headers": {"X-Amz-User-Agent": "aws-sdk-js/2.528.0 promise", "Content-Type": "application/x-amz-json-1.1",
+        #              "X-Amz-Target": "AWSBlackbeardService.GetAccountInfo"}, "path": "/", "method": "POST",
+        #  "region": "eu-west-1", "params": {},
+        #  "contentString": "{\"AccountEmail\":\"EMAILTOCHECK\"}",
+        #  "operation": "getAccountInfo"}
+
+        # {"HomeRegion": "eu-west-1", "LogAccountEmail": "logging-testing-account@domain.com",
+        #  "SecurityAccountEmail": "security-testing-account@domain.com",
+        #  "RegionConfigurationList": [{"Region": "us-east-1", "RegionConfigurationStatus": "DISABLED"},
+        #                              {"Region": "us-east-2", "RegionConfigurationStatus": "DISABLED"},
+        #                              {"Region": "us-west-2", "RegionConfigurationStatus": "DISABLED"},
+        #                              {"Region": "eu-west-1", "RegionConfigurationStatus": "ENABLED"},
+        #                              {"Region": "ap-southeast-2", "RegionConfigurationStatus": "DISABLED"},
+        #                              {"Region": "ap-southeast-1", "RegionConfigurationStatus": "DISABLED"},
+        #                              {"Region": "eu-central-1", "RegionConfigurationStatus": "DISABLED"},
+        #                              {"Region": "eu-west-2", "RegionConfigurationStatus": "DISABLED"},
+        #                              {"Region": "ca-central-1", "RegionConfigurationStatus": "DISABLED"},
+        #                              {"Region": "eu-north-1", "RegionConfigurationStatus": "DISABLED"}
+        #
+
         payload = self._get_api_payload(content_string={'HomeRegion': self.region,
                                                         'LogAccountEmail': logging_account_email,
                                                         'SecurityAccountEmail': security_account_email},
