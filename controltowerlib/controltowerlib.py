@@ -600,6 +600,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          'getLandingZoneStatus',
                          'setupLandingZone',
                          'getHomeRegion',
+                         'listGuardrailViolations'
                          ]
     core_account_types = ['PRIMARY', 'LOGGING', 'SECURITY']
 
@@ -1253,4 +1254,12 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         output = []
         for result in self._get_paginated_results(content_payload={}, target='listGuardrails'):
             output.extend([GuardRail(self, data) for data in result.get('GuardrailList')])
+        return output
+
+    @property
+    def guard_rails_violations(self):
+        """List guard rails violations."""
+        output = []
+        for result in self._get_paginated_results(content_payload={}, target='listGuardrailViolations'):
+            output.extend([GuardRail(self, data) for data in result.get('GuardrailViolationList')])
         return output
