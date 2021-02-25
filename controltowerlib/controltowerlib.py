@@ -1261,5 +1261,5 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """List guard rails violations."""
         output = []
         for result in self._get_paginated_results(content_payload={}, target='listGuardrailViolations'):
-            output.extend([GuardRail(self, data) for data in result.get('GuardrailViolationList')])
+            output.extend([data for data in result.get('GuardrailViolationList')])
         return output
