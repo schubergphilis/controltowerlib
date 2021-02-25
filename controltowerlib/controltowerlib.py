@@ -136,7 +136,7 @@ class ServiceControlPolicy:
         return self._data.get('Type')
 
 
-class GuardRail:
+class GuardRail(LoggerMixin):
     """Models the guard rail data."""
 
     def __init__(self, control_tower, data):
@@ -187,6 +187,20 @@ class GuardRail:
     def type(self):
         """Type."""
         return self._data_.get('Type')
+
+    @property
+    def compliancy_status(self):
+        """Compliancy status."""
+        payload = self.control_tower._get_api_payload(content_string={'GuardrailName': self.name},
+                                                      target='getGuardrailComplianceStatus')
+        self.logger.debug('Trying to get the compliancy status with payload "%s"', payload)
+        response = self.control_tower.session.post(self.control_tower.url, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to get the drift message of the landing zone with response status "%s" and '
+                              'response text "%s"',
+                              response.status_code, response.text)
+            return None
+        return response.json().get('ComplianceStatus')
 
 
 class CoreAccount:
@@ -600,7 +614,9 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          'getLandingZoneStatus',
                          'setupLandingZone',
                          'getHomeRegion',
-                         'listGuardrailViolations'
+                         'listGuardrailViolations',
+                         'getCatastrophicDrift',
+                         'getGuardrailComplianceStatus'
                          ]
     core_account_types = ['PRIMARY', 'LOGGING', 'SECURITY']
 
@@ -1262,4 +1278,12 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         output = []
         for result in self._get_paginated_results(content_payload={}, target='listGuardrailViolations'):
             output.extend([data for data in result.get('GuardrailViolationList')])
+        return output
+
+    @property
+    def catastrophic_drift(self):
+        """List of catastrophic drift."""
+        output = []
+        for result in self._get_paginated_results(content_payload={}, target='getCatastrophicDrift'):
+            output.extend(result.get('DriftDetails'))
         return output
