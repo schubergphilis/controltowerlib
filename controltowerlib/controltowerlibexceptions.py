@@ -72,3 +72,7 @@ class ControlTowerBusy(Exception):
 
 class ControlTowerNotDeployed(Exception):
     """The control tower is deployed at all."""
+
+
+class PreDeployValidationFailed(Exception):
+    """The pre deployment validation failed."""

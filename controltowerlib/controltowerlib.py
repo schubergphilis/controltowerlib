@@ -50,7 +50,8 @@ from .controltowerlibexceptions import (UnsupportedTarget,
                                         NoSuspendedOU,
                                         ServiceCallFailed,
                                         ControlTowerBusy,
-                                        ControlTowerNotDeployed)
+                                        ControlTowerNotDeployed,
+                                        PreDeployValidationFailed)
 
 __author__ = '''Costas Tyfoxylos <ctyfoxylos@schubergphilis.com>'''
 __docformat__ = '''google'''
@@ -1377,3 +1378,44 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                               response.status_code, response.text)
             return {}
         return response.json().get('AccountFactoryConfig')
+
+    def _pre_deploy_check(self):
+        """Pre deployment check."""
+        payload = self._get_api_payload(content_string={},
+                                        target='performPreLaunchChecks')
+        self.logger.debug('Trying the pre deployment check with payload "%s"', payload)
+        response = self.session.post(self.url, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to do the pre deployment checks with response status '
+                              '"%s" and response text "%s"',
+                              response.status_code, response.text)
+            return []
+        return response.json().get('PreLaunchChecksResult')
+
+    def deploy(self, logging_account_email, security_account_email):
+        """Deploys control tower.
+
+        Returns:
+            bool: True on success, False on failure.
+
+        """
+        if self.is_deployed:
+            self.logger.warning('Control tower does not seem to need deploying, already deployed.')
+            return True
+        validation = self._pre_deploy_check()
+        if not all([list(entry.values()).pop().get('Result') == 'SUCCESS' for entry in validation]):
+            raise PreDeployValidationFailed(validation)
+        payload = self._get_api_payload(content_string={'HomeRegion': self.region,
+                                                        'LogAccountEmail': logging_account_email,
+                                                        'SecurityAccountEmail': security_account_email},
+                                        target='setupLandingZone')
+        self.logger.debug('Trying to deploy control tower with payload "%s"', payload)
+        headers = {'Referer':
+                       f'https://{self.region}.console.aws.amazon.com/controltower/home/setup?region={self.region}'}
+        response = self.session.post(self.url, headers=headers, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to deploy control tower with response status "%s" and response text "%s"',
+                              response.status_code, response.text)
+            return False
+        self.logger.debug('Successfully started deploying control tower.')
+        return True
