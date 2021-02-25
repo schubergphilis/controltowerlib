@@ -599,6 +599,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          'listDriftDetails',
                          'getLandingZoneStatus',
                          'setupLandingZone',
+                         'getHomeRegion',
                          ]
     core_account_types = ['PRIMARY', 'LOGGING', 'SECURITY']
 
@@ -606,15 +607,27 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         self.aws_authenticator = AwsAuthenticator(arn)
         self.service_catalog = boto3.client('servicecatalog', **self.aws_authenticator.assumed_role_credentials)
         self.organizations = boto3.client('organizations', **self.aws_authenticator.assumed_role_credentials)
-        self.region = self.aws_authenticator.region
-        self._account_factory = self._get_account_factory(self.service_catalog)
-        self.url = f'https://{self.region}.console.aws.amazon.com/controltower/api/controltower'
         self.session = self._get_authenticated_session()
+        self._region = None
+        self.url = f'https://{self.region}.console.aws.amazon.com/controltower/api/controltower'
+        self._account_factory = self._get_account_factory(self.service_catalog)
         self.settling_time = settling_time
         self.suspended_ou_name = suspended_ou_name
         self._root_ou = None
         self._update_data_ = None
         self._core_accounts = None
+
+    @property
+    def region(self):
+        if self._region is None:
+            caller_region = self.aws_authenticator.region
+            url = f'https://{caller_region}.console.aws.amazon.com/controltower/api/controltower'
+            payload = self._get_api_payload(content_string={}, target='getHomeRegion', region=caller_region)
+            response = self.session.post(url, json=payload)
+            if not response.ok:
+                raise ServiceCallFailed(payload)
+            self._region = response.json().get('HomeRegion')
+        return self._region
 
     @property
     def core_accounts(self):
