@@ -31,3 +31,9 @@ History
 ------------------
 
 * Implemented control tower versions and account update capabilites.
+
+
+0.3.0 (26-02-2021)
+------------------
+
+* Implemented control tower update, identifying the deployment status and locking when busy, along with exposing some more data like guard rails and drift messages.
