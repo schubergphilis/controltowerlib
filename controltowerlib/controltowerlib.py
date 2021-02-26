@@ -636,8 +636,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                 raise ControlTowerNotDeployed
             if contol_tower_instance.busy:
                 raise ControlTowerBusy
-            output = method(*args, **kwargs)  # pylint: disable=not-callable
-            return output
+            return method(*args, **kwargs)  # pylint: disable=not-callable
         return wrap
 
     def __init__(self, arn, settling_time=60, suspended_ou_name='Suspended'):
@@ -658,8 +657,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
     @property
     def is_deployed(self):
         """The deployment status of control tower."""
-        if any([self._is_deployed is None,
-                not self._is_deployed]):
+        if not self._is_deployed:
             caller_region = self.aws_authenticator.region
             url = f'https://{caller_region}.console.aws.amazon.com/controltower/api/controltower'
             payload = self._get_api_payload(content_string={},
