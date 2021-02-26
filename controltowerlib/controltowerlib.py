@@ -40,6 +40,7 @@ from time import sleep
 
 import boto3
 import botocore
+import requests
 from awsauthenticationlib import AwsAuthenticator
 from opnieuw import retry
 
@@ -688,6 +689,23 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                 raise ServiceCallFailed(payload)
             self._region = response.json().get('HomeRegion')
         return self._region
+
+    @property
+    def available_regions(self):
+        """The regions that control tower can be active in.
+
+        Returns:
+            regions (list): A list of strings of the regions that control tower can be active in.
+
+        """
+        url = 'https://api.regional-table.region-services.aws.a2z.com/index.json'
+        response = requests.get(url)
+        if not response.ok:
+            LOGGER.error('Failed to retrieve the info')
+            return []
+        return [entry.get('id', '').split(':')[1]
+                for entry in response.json().get('prices')
+                if entry.get('id').startswith('controltower')]
 
     @property
     @validate_availability
