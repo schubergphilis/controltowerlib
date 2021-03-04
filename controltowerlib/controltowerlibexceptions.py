@@ -88,3 +88,7 @@ class EmailInUse(Exception):
 
 class UnavailableRegion(Exception):
     """The region or regions provided to control tower to deploy in are not available."""
+
+
+class RoleCreationFailure(Exception):
+    """Unable to create the required roles for the deployment of control tower, manual clean up is required."""
