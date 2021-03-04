@@ -52,7 +52,10 @@ from .controltowerlibexceptions import (UnsupportedTarget,
                                         ServiceCallFailed,
                                         ControlTowerBusy,
                                         ControlTowerNotDeployed,
-                                        PreDeployValidationFailed)
+                                        PreDeployValidationFailed,
+                                        EmailCheckFailed,
+                                        EmailInUse,
+                                        UnavailableRegion)
 
 __author__ = '''Costas Tyfoxylos <ctyfoxylos@schubergphilis.com>'''
 __docformat__ = '''google'''
@@ -690,8 +693,8 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             self._region = response.json().get('HomeRegion')
         return self._region
 
-    @property
-    def available_regions(self):
+    @staticmethod
+    def get_available_regions():
         """The regions that control tower can be active in.
 
         Returns:
@@ -1411,52 +1414,54 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             return []
         return response.json().get('PreLaunchChecksResult')
 
-    def deploy(self, logging_account_email, security_account_email):
+    def is_email_used(self, email):
+        """Check email for availability to be used or if it is already in use."""
+        payload = self._get_api_payload(content_string={'AccountEmail': email},
+                                        target='getAccountInfo')
+        self.logger.debug('Trying to check email with payload "%s"', payload)
+        response = self.session.post(self.url, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to check for email with response status '
+                              '"%s" and response text "%s"',
+                              response.status_code, response.text)
+            raise EmailCheckFailed(response.text)
+        return response.json().get('AccountWithEmailExists')
+
+    def _validate_regions(self, regions):
+        available_regions = self.get_available_regions()
+        if not set(available_regions).issuperset(set(regions)):
+            raise UnavailableRegion(set(regions) - set(available_regions))
+        return regions
+
+    def deploy(self, logging_account_email, security_account_email, regions=None):
         """Deploys control tower.
 
         Returns:
             bool: True on success, False on failure.
 
         """
-        return NotImplemented
-        # if self.is_deployed:
-        #     self.logger.warning('Control tower does not seem to need deploying, already deployed.')
-        #     return True
-        # validation = self._pre_deploy_check()
-        # if not all([list(entry.values()).pop().get('Result') == 'SUCCESS' for entry in validation]):
-        #     raise PreDeployValidationFailed(validation)
-        # validate that the emails are not used anywhere.
-        # {"headers": {"X-Amz-User-Agent": "aws-sdk-js/2.528.0 promise", "Content-Type": "application/x-amz-json-1.1",
-        #              "X-Amz-Target": "AWSBlackbeardService.GetAccountInfo"}, "path": "/", "method": "POST",
-        #  "region": "eu-west-1", "params": {},
-        #  "contentString": "{\"AccountEmail\":\"EMAILTOCHECK\"}",
-        #  "operation": "getAccountInfo"}
-
-        # {"HomeRegion": "eu-west-1", "LogAccountEmail": "logging-testing-account@domain.com",
-        #  "SecurityAccountEmail": "security-testing-account@domain.com",
-        #  "RegionConfigurationList": [{"Region": "us-east-1", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "us-east-2", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "us-west-2", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "eu-west-1", "RegionConfigurationStatus": "ENABLED"},
-        #                              {"Region": "ap-southeast-2", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "ap-southeast-1", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "eu-central-1", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "eu-west-2", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "ca-central-1", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "eu-north-1", "RegionConfigurationStatus": "DISABLED"}
-        #
-
-        # payload = self._get_api_payload(content_string={'HomeRegion': self.region,
-        #                                                 'LogAccountEmail': logging_account_email,
-        #                                                 'SecurityAccountEmail': security_account_email},
-        #                                 target='setupLandingZone')
-        # self.logger.debug('Trying to deploy control tower with payload "%s"', payload)
-        # headers = {'Referer':
-        #                f'https://{self.region}.console.aws.amazon.com/controltower/home/setup?region={self.region}'}
-        # response = self.session.post(self.url, headers=headers, json=payload)
-        # if not response.ok:
-        #     self.logger.error('Failed to deploy control tower with response status "%s" and response text "%s"',
-        #                       response.status_code, response.text)
-        #     return False
-        # self.logger.debug('Successfully started deploying control tower.')
-        # return True
+        if self.is_deployed:
+            self.logger.warning('Control tower does not seem to need deploying, already deployed.')
+            return True
+        regions = self._validate_regions(regions or [self.region])
+        region_list = [{"Region": region, "RegionConfigurationStatus": "ENABLED" if region in regions else "DISABLED"}
+                       for region in self.get_available_regions()]
+        validation = self._pre_deploy_check()
+        if not all([list(entry.values()).pop().get('Result') == 'SUCCESS' for entry in validation]):
+            raise PreDeployValidationFailed(validation)
+        for email in [logging_account_email, security_account_email]:
+            if self.is_email_used(email):
+                raise EmailInUse(email)
+        payload = self._get_api_payload(content_string={'HomeRegion': self.region,
+                                                        'LogAccountEmail': logging_account_email,
+                                                        'SecurityAccountEmail': security_account_email,
+                                                        'RegionConfigurationList': region_list},
+                                        target='setupLandingZone')
+        self.logger.debug('Trying to deploy control tower with payload "%s"', payload)
+        response = self.session.post(self.url, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to deploy control tower with response status "%s" and response text "%s"',
+                              response.status_code, response.text)
+            return False
+        self.logger.debug('Successfully started deploying control tower.')
+        return True
