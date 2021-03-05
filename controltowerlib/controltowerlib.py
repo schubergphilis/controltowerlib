@@ -629,7 +629,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          ]
     core_account_types = ['PRIMARY', 'LOGGING', 'SECURITY']
 
-    def validate_availability(method):  # pylint: disable=no-self-argument
+    def validate_availability(method):  # noqa
         """Validation decorator."""
         @wraps(method)
         def wrap(*args, **kwargs):
@@ -1443,10 +1443,16 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                    'region': 'us-east-1'}
         self.logger.debug('Trying to system role with payload "%s"', payload)
         response = self.session.post(self._iam_admin_url, json=payload)
-        if not response.ok:
-            self.logger.error('Failed to create system role with response status "%s" and response text "%s"',
+        if all([not response.ok,
+                response.status_code == 409,
+                response.json().get('Error', {}).get('Code') == 'EntityAlreadyExists]']):
+            self.logger.error('Entity already exists, response status "%s" and response text "%s"',
                               response.status_code, response.text)
-            return False
+            return True
+        if not response.ok:
+            self.logger.error('Entity already exists, response status "%s" and response text "%s"',
+                              response.status_code, response.text)
+            return True
         self.logger.debug('Successfully created system role.')
         return True
 
@@ -1512,11 +1518,13 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         region_list = [{"Region": region, "RegionConfigurationStatus": "ENABLED" if region in regions else "DISABLED"}
                        for region in self.get_available_regions()]
         validation = self._pre_deploy_check()
+        self.logger.debug('Got validation response %s.', validation)
         if not all([list(entry.values()).pop().get('Result') == 'SUCCESS' for entry in validation]):
             raise PreDeployValidationFailed(validation)
-        for email in [logging_account_email, security_account_email]:
-            if self.is_email_used(email):
-                raise EmailInUse(email)
+        invalid_emails = [email for email in [logging_account_email, security_account_email]
+                          if self.is_email_used(email)]
+        if invalid_emails:
+            raise EmailInUse(invalid_emails)
         if not all([self._create_control_tower_admin(),
                     self._create_control_tower_cloud_trail_role(),
                     self._create_control_tower_stack_set_role(),
@@ -1530,10 +1538,24 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                                                         'RegionConfigurationList': region_list},
                                         target='setupLandingZone')
         self.logger.debug('Trying to deploy control tower with payload "%s"', payload)
-        response = self.session.post(self.url, json=payload)
-        if not response.ok:
-            self.logger.error('Failed to deploy control tower with response status "%s" and response text "%s"',
-                              response.status_code, response.text)
+        return self._deploy(payload)
+
+    def _deploy(self, payload, retries=10, wait=1):
+        succeded = False
+        while retries:
+            response = self.session.post(self.url, json=payload)
+            succeded = response.ok
+            retries -= 1
+            if response.ok:
+                retries = 0
+            if all([not response.ok,
+                    retries]):
+                self.logger.error('Failed to deploy control tower with response status "%s" and response text "%s"'
+                                  'still have %s retries will wait for %s seconds', response.status_code,
+                                  response.text, retries, wait)
+                sleep(wait)
+        if not succeded:
+            self.logger.error('Failed to deploy control tower, retries were spent.. Maybe try again later?')
             return False
         self.logger.debug('Successfully started deploying control tower.')
         return True
