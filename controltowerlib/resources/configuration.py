@@ -24,19 +24,15 @@
 #
 
 """
-controltowerlib module.
+configuration module.
 
-Import all parts from controltowerlib here
+Import all parts from configuration here
 
 .. _Google Python Style Guide:
    http://google.github.io/styleguide/pyguide.html
 """
-from ._version import __version__
-from .controltowerlibexceptions import (UnsupportedTarget,
-                                        NoServiceCatalogAccess,
-                                        NonExistentSCP,
-                                        NoSuspendedOU)
-from .controltowerlib import ControlTower
+
+import logging
 
 __author__ = '''Costas Tyfoxylos <ctyfoxylos@schubergphilis.com>'''
 __docformat__ = '''google'''
@@ -47,11 +43,23 @@ __maintainer__ = '''Costas Tyfoxylos'''
 __email__ = '''<ctyfoxylos@schubergphilis.com>'''
 __status__ = '''Development'''  # "Prototype", "Development", "Production".
 
-# This is to 'use' the module(s), so lint doesn't complain
-assert __version__
-assert UnsupportedTarget
-assert NoServiceCatalogAccess
 
-assert ControlTower
-assert NonExistentSCP
-assert NoSuspendedOU
+LOGGER_BASENAME = '''controltowerlib'''
+LOGGER = logging.getLogger(LOGGER_BASENAME)
+LOGGER.addHandler(logging.NullHandler())
+
+CREATING_ACCOUNT_ERROR_MESSAGE = 'Package is in state CREATING, but must be in state AVAILABLE'
+
+
+class LoggerMixin:  # pylint: disable=too-few-public-methods
+    """Logger."""
+
+    @property
+    def logger(self):
+        """Exposes the logger to be used by objects using the Mixin.
+
+        Returns:
+            logger (logger): The properly named logger.
+
+        """
+        return logging.getLogger(f'{LOGGER_BASENAME}.{self.__class__.__name__}')
