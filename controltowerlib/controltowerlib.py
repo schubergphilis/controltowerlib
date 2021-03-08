@@ -653,12 +653,21 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         self._is_deployed = None
         self.url = f'https://{self.region}.console.aws.amazon.com/controltower/api/controltower'
         self._iam_admin_url = 'https://eu-west-1.console.aws.amazon.com/controltower/api/iamadmin'
-        self._account_factory = self._get_account_factory(self.service_catalog) if self.is_deployed else None
+        self._account_factory_ = None
         self.settling_time = settling_time
         self.suspended_ou_name = suspended_ou_name
         self._root_ou = None
         self._update_data_ = None
         self._core_accounts = None
+
+    @property
+    def _account_factory(self):
+        if any([not self.is_deployed,
+                self.percentage_complete != 100]):
+            return None
+        if self._account_factory_ is None:
+            self._account_factory_ = self._get_account_factory(self.service_catalog)
+        return self._account_factory_
 
     @property
     def is_deployed(self):
@@ -1436,9 +1445,14 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return regions
 
     def _create_system_role(self, parameters):
+        default_params = {'Action': 'CreateServiceRole',
+                          'ContentType': 'JSON',
+                          'ServicePrincipalName': 'controltower.amazonaws.com',
+                          'TemplateVersion': 1}
+        default_params.update(parameters)
         payload = {'headers': {'Content-Type': 'application/x-amz-json-1.1'},
                    'method': 'GET',
-                   'params': parameters,
+                   'params': default_params,
                    'path': '/',
                    'region': 'us-east-1'}
         self.logger.debug('Trying to system role with payload "%s"', payload)
@@ -1457,54 +1471,39 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return True
 
     def _create_control_tower_admin(self):
-        parameters = {'Action': 'CreateServiceRole',
-                      'AmazonManagedPolicyArn': 'arn:aws:iam::aws:policy/service-role/AWSControlTowerServiceRolePolicy',
-                      'ContentType': 'JSON',
+        parameters = {'AmazonManagedPolicyArn': 'arn:aws:iam::aws:policy/service-role/AWSControlTowerServiceRolePolicy',
                       'Description': 'AWS Control Tower policy to manage AWS resources',
                       'PolicyName': 'AWSControlTowerAdminPolicy',
                       'RoleName': 'AWSControlTowerAdmin',
-                      'ServicePrincipalName': 'controltower.amazonaws.com',
                       'TemplateName': 'AWSControlTowerAdmin',
                       'TemplateVersion': 2}
         return self._create_system_role(parameters)
 
     def _create_control_tower_cloud_trail_role(self):
-        parameters = {'Action': 'CreateServiceRole',
-                      'ContentType': 'JSON',
-                      'Description': 'AWS Cloud Trail assumes this role to create and '
+        parameters = {'Description': 'AWS Cloud Trail assumes this role to create and '
                                      'publish Cloud Trail logs',
                       'PolicyName': 'AWSControlTowerCloudTrailRolePolicy',
                       'RoleName': 'AWSControlTowerCloudTrailRole',
-                      'ServicePrincipalName': 'controltower.amazonaws.com',
-                      'TemplateName': 'AWSControlTowerCloudTrailRole',
-                      'TemplateVersion': 1}
+                      'TemplateName': 'AWSControlTowerCloudTrailRole'}
         return self._create_system_role(parameters)
 
     def _create_control_tower_stack_set_role(self):
-        parameters = {'Action': 'CreateServiceRole',
-                      'ContentType': 'JSON',
-                      'Description': 'AWS CloudFormation assumes this role to deploy '
+        parameters = {'Description': 'AWS CloudFormation assumes this role to deploy '
                                      'stacksets in accounts created by AWS Control Tower',
                       'PolicyName': 'AWSControlTowerStackSetRolePolicy',
                       'RoleName': 'AWSControlTowerStackSetRole',
-                      'ServicePrincipalName': 'controltower.amazonaws.com',
-                      'TemplateName': 'AWSControlTowerStackSetRole',
-                      'TemplateVersion': 1}
+                      'TemplateName': 'AWSControlTowerStackSetRole'}
         return self._create_system_role(parameters)
 
     def _create_control_tower_config_aggregator_role(self):
-        parameters = {'Action': 'CreateServiceRole',
-                      'AmazonManagedPolicyArn': 'arn:aws:iam::aws:policy/service-role/AWSConfigRoleForOrganizations',
-                      'ContentType': 'JSON',
+        parameters = {'AmazonManagedPolicyArn': 'arn:aws:iam::aws:policy/service-role/AWSConfigRoleForOrganizations',
                       'Description': 'AWS ControlTower needs this role to help in '
                                      'external config rule detection',
                       'RoleName': 'AWSControlTowerConfigAggregatorRoleForOrganizations',
-                      'ServicePrincipalName': 'controltower.amazonaws.com',
-                      'TemplateName': 'AWSControlTowerConfigAggregatorRole',
-                      'TemplateVersion': 1}
+                      'TemplateName': 'AWSControlTowerConfigAggregatorRole'}
         return self._create_system_role(parameters)
 
-    def deploy(self, logging_account_email, security_account_email, regions=None):
+    def deploy(self, logging_account_email, security_account_email, regions=None, retries=10, wait=1):
         """Deploys control tower.
 
         Returns:
@@ -1538,7 +1537,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                                                         'RegionConfigurationList': region_list},
                                         target='setupLandingZone')
         self.logger.debug('Trying to deploy control tower with payload "%s"', payload)
-        return self._deploy(payload)
+        return self._deploy(payload, retries, wait)
 
     def _deploy(self, payload, retries=10, wait=1):
         succeded = False
