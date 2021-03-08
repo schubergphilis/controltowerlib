@@ -40,6 +40,7 @@ from time import sleep
 
 import boto3
 import botocore
+import requests
 from awsauthenticationlib import AwsAuthenticator
 from opnieuw import retry
 
@@ -51,7 +52,11 @@ from .controltowerlibexceptions import (UnsupportedTarget,
                                         ServiceCallFailed,
                                         ControlTowerBusy,
                                         ControlTowerNotDeployed,
-                                        PreDeployValidationFailed)
+                                        PreDeployValidationFailed,
+                                        EmailCheckFailed,
+                                        EmailInUse,
+                                        UnavailableRegion,
+                                        RoleCreationFailure)
 
 __author__ = '''Costas Tyfoxylos <ctyfoxylos@schubergphilis.com>'''
 __docformat__ = '''google'''
@@ -624,7 +629,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          ]
     core_account_types = ['PRIMARY', 'LOGGING', 'SECURITY']
 
-    def validate_availability(method):  # pylint: disable=no-self-argument
+    def validate_availability(method):  # noqa
         """Validation decorator."""
         @wraps(method)
         def wrap(*args, **kwargs):
@@ -647,6 +652,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         self._region = None
         self._is_deployed = None
         self.url = f'https://{self.region}.console.aws.amazon.com/controltower/api/controltower'
+        self._iam_admin_url = 'https://eu-west-1.console.aws.amazon.com/controltower/api/iamadmin'
         self._account_factory = self._get_account_factory(self.service_catalog) if self.is_deployed else None
         self.settling_time = settling_time
         self.suspended_ou_name = suspended_ou_name
@@ -688,6 +694,23 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                 raise ServiceCallFailed(payload)
             self._region = response.json().get('HomeRegion')
         return self._region
+
+    @staticmethod
+    def get_available_regions():
+        """The regions that control tower can be active in.
+
+        Returns:
+            regions (list): A list of strings of the regions that control tower can be active in.
+
+        """
+        url = 'https://api.regional-table.region-services.aws.a2z.com/index.json'
+        response = requests.get(url)
+        if not response.ok:
+            LOGGER.error('Failed to retrieve the info')
+            return []
+        return [entry.get('id', '').split(':')[1]
+                for entry in response.json().get('prices')
+                if entry.get('id').startswith('controltower')]
 
     @property
     @validate_availability
@@ -1393,52 +1416,146 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             return []
         return response.json().get('PreLaunchChecksResult')
 
-    def deploy(self, logging_account_email, security_account_email):
+    def is_email_used(self, email):
+        """Check email for availability to be used or if it is already in use."""
+        payload = self._get_api_payload(content_string={'AccountEmail': email},
+                                        target='getAccountInfo')
+        self.logger.debug('Trying to check email with payload "%s"', payload)
+        response = self.session.post(self.url, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to check for email with response status '
+                              '"%s" and response text "%s"',
+                              response.status_code, response.text)
+            raise EmailCheckFailed(response.text)
+        return response.json().get('AccountWithEmailExists')
+
+    def _validate_regions(self, regions):
+        available_regions = self.get_available_regions()
+        if not set(available_regions).issuperset(set(regions)):
+            raise UnavailableRegion(set(regions) - set(available_regions))
+        return regions
+
+    def _create_system_role(self, parameters):
+        payload = {'headers': {'Content-Type': 'application/x-amz-json-1.1'},
+                   'method': 'GET',
+                   'params': parameters,
+                   'path': '/',
+                   'region': 'us-east-1'}
+        self.logger.debug('Trying to system role with payload "%s"', payload)
+        response = self.session.post(self._iam_admin_url, json=payload)
+        if all([not response.ok,
+                response.status_code == 409,
+                response.json().get('Error', {}).get('Code') == 'EntityAlreadyExists]']):
+            self.logger.error('Entity already exists, response status "%s" and response text "%s"',
+                              response.status_code, response.text)
+            return True
+        if not response.ok:
+            self.logger.error('Entity already exists, response status "%s" and response text "%s"',
+                              response.status_code, response.text)
+            return True
+        self.logger.debug('Successfully created system role.')
+        return True
+
+    def _create_control_tower_admin(self):
+        parameters = {'Action': 'CreateServiceRole',
+                      'AmazonManagedPolicyArn': 'arn:aws:iam::aws:policy/service-role/AWSControlTowerServiceRolePolicy',
+                      'ContentType': 'JSON',
+                      'Description': 'AWS Control Tower policy to manage AWS resources',
+                      'PolicyName': 'AWSControlTowerAdminPolicy',
+                      'RoleName': 'AWSControlTowerAdmin',
+                      'ServicePrincipalName': 'controltower.amazonaws.com',
+                      'TemplateName': 'AWSControlTowerAdmin',
+                      'TemplateVersion': 2}
+        return self._create_system_role(parameters)
+
+    def _create_control_tower_cloud_trail_role(self):
+        parameters = {'Action': 'CreateServiceRole',
+                      'ContentType': 'JSON',
+                      'Description': 'AWS Cloud Trail assumes this role to create and '
+                                     'publish Cloud Trail logs',
+                      'PolicyName': 'AWSControlTowerCloudTrailRolePolicy',
+                      'RoleName': 'AWSControlTowerCloudTrailRole',
+                      'ServicePrincipalName': 'controltower.amazonaws.com',
+                      'TemplateName': 'AWSControlTowerCloudTrailRole',
+                      'TemplateVersion': 1}
+        return self._create_system_role(parameters)
+
+    def _create_control_tower_stack_set_role(self):
+        parameters = {'Action': 'CreateServiceRole',
+                      'ContentType': 'JSON',
+                      'Description': 'AWS CloudFormation assumes this role to deploy '
+                                     'stacksets in accounts created by AWS Control Tower',
+                      'PolicyName': 'AWSControlTowerStackSetRolePolicy',
+                      'RoleName': 'AWSControlTowerStackSetRole',
+                      'ServicePrincipalName': 'controltower.amazonaws.com',
+                      'TemplateName': 'AWSControlTowerStackSetRole',
+                      'TemplateVersion': 1}
+        return self._create_system_role(parameters)
+
+    def _create_control_tower_config_aggregator_role(self):
+        parameters = {'Action': 'CreateServiceRole',
+                      'AmazonManagedPolicyArn': 'arn:aws:iam::aws:policy/service-role/AWSConfigRoleForOrganizations',
+                      'ContentType': 'JSON',
+                      'Description': 'AWS ControlTower needs this role to help in '
+                                     'external config rule detection',
+                      'RoleName': 'AWSControlTowerConfigAggregatorRoleForOrganizations',
+                      'ServicePrincipalName': 'controltower.amazonaws.com',
+                      'TemplateName': 'AWSControlTowerConfigAggregatorRole',
+                      'TemplateVersion': 1}
+        return self._create_system_role(parameters)
+
+    def deploy(self, logging_account_email, security_account_email, regions=None):
         """Deploys control tower.
 
         Returns:
             bool: True on success, False on failure.
 
         """
-        return NotImplemented
-        # if self.is_deployed:
-        #     self.logger.warning('Control tower does not seem to need deploying, already deployed.')
-        #     return True
-        # validation = self._pre_deploy_check()
-        # if not all([list(entry.values()).pop().get('Result') == 'SUCCESS' for entry in validation]):
-        #     raise PreDeployValidationFailed(validation)
-        # validate that the emails are not used anywhere.
-        # {"headers": {"X-Amz-User-Agent": "aws-sdk-js/2.528.0 promise", "Content-Type": "application/x-amz-json-1.1",
-        #              "X-Amz-Target": "AWSBlackbeardService.GetAccountInfo"}, "path": "/", "method": "POST",
-        #  "region": "eu-west-1", "params": {},
-        #  "contentString": "{\"AccountEmail\":\"EMAILTOCHECK\"}",
-        #  "operation": "getAccountInfo"}
+        if self.is_deployed:
+            self.logger.warning('Control tower does not seem to need deploying, already deployed.')
+            return True
+        regions = self._validate_regions(regions or [self.region])
+        region_list = [{"Region": region, "RegionConfigurationStatus": "ENABLED" if region in regions else "DISABLED"}
+                       for region in self.get_available_regions()]
+        validation = self._pre_deploy_check()
+        self.logger.debug('Got validation response %s.', validation)
+        if not all([list(entry.values()).pop().get('Result') == 'SUCCESS' for entry in validation]):
+            raise PreDeployValidationFailed(validation)
+        invalid_emails = [email for email in [logging_account_email, security_account_email]
+                          if self.is_email_used(email)]
+        if invalid_emails:
+            raise EmailInUse(invalid_emails)
+        if not all([self._create_control_tower_admin(),
+                    self._create_control_tower_cloud_trail_role(),
+                    self._create_control_tower_stack_set_role(),
+                    self._create_control_tower_config_aggregator_role()]):
+            raise RoleCreationFailure('Unable to create required roles AWSControlTowerAdmin, '
+                                      'AWSControlTowerCloudTrailRole, AWSControlTowerStackSetRole, '
+                                      'AWSControlTowerConfigAggregatorRole, manual cleanup is required.')
+        payload = self._get_api_payload(content_string={'HomeRegion': self.region,
+                                                        'LogAccountEmail': logging_account_email,
+                                                        'SecurityAccountEmail': security_account_email,
+                                                        'RegionConfigurationList': region_list},
+                                        target='setupLandingZone')
+        self.logger.debug('Trying to deploy control tower with payload "%s"', payload)
+        return self._deploy(payload)
 
-        # {"HomeRegion": "eu-west-1", "LogAccountEmail": "logging-testing-account@domain.com",
-        #  "SecurityAccountEmail": "security-testing-account@domain.com",
-        #  "RegionConfigurationList": [{"Region": "us-east-1", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "us-east-2", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "us-west-2", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "eu-west-1", "RegionConfigurationStatus": "ENABLED"},
-        #                              {"Region": "ap-southeast-2", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "ap-southeast-1", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "eu-central-1", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "eu-west-2", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "ca-central-1", "RegionConfigurationStatus": "DISABLED"},
-        #                              {"Region": "eu-north-1", "RegionConfigurationStatus": "DISABLED"}
-        #
-
-        # payload = self._get_api_payload(content_string={'HomeRegion': self.region,
-        #                                                 'LogAccountEmail': logging_account_email,
-        #                                                 'SecurityAccountEmail': security_account_email},
-        #                                 target='setupLandingZone')
-        # self.logger.debug('Trying to deploy control tower with payload "%s"', payload)
-        # headers = {'Referer':
-        #                f'https://{self.region}.console.aws.amazon.com/controltower/home/setup?region={self.region}'}
-        # response = self.session.post(self.url, headers=headers, json=payload)
-        # if not response.ok:
-        #     self.logger.error('Failed to deploy control tower with response status "%s" and response text "%s"',
-        #                       response.status_code, response.text)
-        #     return False
-        # self.logger.debug('Successfully started deploying control tower.')
-        # return True
+    def _deploy(self, payload, retries=10, wait=1):
+        succeded = False
+        while retries:
+            response = self.session.post(self.url, json=payload)
+            succeded = response.ok
+            retries -= 1
+            if response.ok:
+                retries = 0
+            if all([not response.ok,
+                    retries]):
+                self.logger.error('Failed to deploy control tower with response status "%s" and response text "%s"'
+                                  'still have %s retries will wait for %s seconds', response.status_code,
+                                  response.text, retries, wait)
+                sleep(wait)
+        if not succeded:
+            self.logger.error('Failed to deploy control tower, retries were spent.. Maybe try again later?')
+            return False
+        self.logger.debug('Successfully started deploying control tower.')
+        return True

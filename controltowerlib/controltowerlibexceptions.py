@@ -76,3 +76,19 @@ class ControlTowerNotDeployed(Exception):
 
 class PreDeployValidationFailed(Exception):
     """The pre deployment validation failed."""
+
+
+class EmailCheckFailed(Exception):
+    """Checking of the email was not possible."""
+
+
+class EmailInUse(Exception):
+    """The email privided is already in use and cannot be used to deploy an account."""
+
+
+class UnavailableRegion(Exception):
+    """The region or regions provided to control tower to deploy in are not available."""
+
+
+class RoleCreationFailure(Exception):
+    """Unable to create the required roles for the deployment of control tower, manual clean up is required."""
