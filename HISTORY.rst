@@ -37,3 +37,9 @@ History
 ------------------
 
 * Implemented control tower update, identifying the deployment status and locking when busy, along with exposing some more data like guard rails and drift messages.
+
+
+0.4.0 (11-03-2021)
+------------------
+
+* Made account deletion not depending on the suspended OU existance and account factory retrieval checking for CT being deployed.
