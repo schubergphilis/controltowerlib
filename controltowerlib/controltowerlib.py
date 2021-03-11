@@ -125,7 +125,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
         return wrap
 
-    def __init__(self, arn, settling_time=60, suspended_ou_name='Suspended'):
+    def __init__(self, arn, settling_time=60):
         self.aws_authenticator = AwsAuthenticator(arn)
         self.service_catalog = boto3.client('servicecatalog', **self.aws_authenticator.assumed_role_credentials)
         self.organizations = boto3.client('organizations', **self.aws_authenticator.assumed_role_credentials)
@@ -136,7 +136,6 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         self._iam_admin_url = 'https://eu-west-1.console.aws.amazon.com/controltower/api/iamadmin'
         self._account_factory_ = None
         self.settling_time = settling_time
-        self.suspended_ou_name = suspended_ou_name
         self._root_ou = None
         self._update_data_ = None
         self._core_accounts = None

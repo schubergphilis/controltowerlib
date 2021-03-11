@@ -437,20 +437,26 @@ class ControlTowerAccount(LoggerMixin):  # pylint: disable=too-many-public-metho
         """
         return self.service_catalog.terminate_provisioned_product(ProvisionedProductId=self.service_catalog_id)
 
-    def delete(self):
+    def delete(self, suspended_ou_name=None):
         """Delete."""
-        suspended_ou = self.control_tower.get_organizational_unit_by_name(self.control_tower.suspended_ou_name)
+        if not suspended_ou_name:
+            return self._terminate()
+        suspended_ou = self.control_tower.get_organizational_unit_by_name(suspended_ou_name)
         if not suspended_ou:
-            raise NoSuspendedOU(self.control_tower.suspended_ou_name)
+            raise NoSuspendedOU(suspended_ou_name)
         self._terminate()
         while self.control_tower.busy:
             self.logger.debug('Waiting for control tower to terminate the account...')
             sleep(self._info_polling_interval)
+        self.logger.debug('Moving account from root OU to %s', suspended_ou_name)
         self.organizations.move_account(AccountId=self.id,
                                         SourceParentId=self.control_tower.root_ou.id,
                                         DestinationParentId=suspended_ou.id)
-        self.attach_service_control_policy(self.control_tower.suspended_ou_name)
+        self.logger.debug('Attaching SCP %s to account', suspended_ou_name)
+        self.attach_service_control_policy(suspended_ou_name)
+        self.logger.debug('Detaching full access SCP from account')
         self.detach_service_control_policy('FullAWSAccess')
+        return True
 
     def update(self):
         """Updates the account in service catalog.
