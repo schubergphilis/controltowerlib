@@ -24,19 +24,26 @@
 #
 
 """
-controltowerlib module.
+configuration module.
 
-Import all parts from controltowerlib here
+Import all parts from configuration here
 
 .. _Google Python Style Guide:
    http://google.github.io/styleguide/pyguide.html
 """
-from ._version import __version__
-from .controltowerlibexceptions import (UnsupportedTarget,
-                                        NoServiceCatalogAccess,
-                                        NonExistentSCP,
-                                        NoSuspendedOU)
-from .controltowerlib import ControlTower
+
+from .configuration import (LoggerMixin,
+                            LOGGER,
+                            LOGGER_BASENAME,
+                            CREATING_ACCOUNT_ERROR_MESSAGE)
+
+from .resources import (CoreAccount,
+                        ControlTowerAccount,
+                        ServiceControlPolicy,
+                        ControlTowerOU,
+                        AccountFactory,
+                        OrganizationsOU,
+                        GuardRail)
 
 __author__ = '''Costas Tyfoxylos <ctyfoxylos@schubergphilis.com>'''
 __docformat__ = '''google'''
@@ -48,10 +55,16 @@ __email__ = '''<ctyfoxylos@schubergphilis.com>'''
 __status__ = '''Development'''  # "Prototype", "Development", "Production".
 
 # This is to 'use' the module(s), so lint doesn't complain
-assert __version__
-assert UnsupportedTarget
-assert NoServiceCatalogAccess
 
-assert ControlTower
-assert NonExistentSCP
-assert NoSuspendedOU
+assert LoggerMixin
+assert LOGGER
+assert LOGGER_BASENAME
+assert CREATING_ACCOUNT_ERROR_MESSAGE
+
+assert CoreAccount
+assert ControlTowerAccount
+assert ControlTowerOU
+assert AccountFactory
+assert ServiceControlPolicy
+assert GuardRail
+assert OrganizationsOU
