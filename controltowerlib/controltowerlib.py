@@ -104,7 +104,8 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          'getCatastrophicDrift',
                          'getGuardrailComplianceStatus',
                          'describeAccountFactoryConfig',
-                         'performPreLaunchChecks'
+                         'performPreLaunchChecks',
+                         'deleteLandingZone'
                          ]
     core_account_types = ['PRIMARY', 'LOGGING', 'SECURITY']
 
@@ -165,7 +166,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                                   '"%s" and response text "%s"',
                                   response.status_code, response.text)
                 raise ServiceCallFailed(payload)
-            self._is_deployed = response.json().get('LandingZoneStatus') != 'NOT_STARTED'
+            self._is_deployed = response.json().get('LandingZoneStatus') not in ('NOT_STARTED', 'DELETE_COMPLETED')
         return self._is_deployed
 
     @property
@@ -181,7 +182,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             response = self.session.post(url, json=payload)
             if not response.ok:
                 raise ServiceCallFailed(payload)
-            self._region = response.json().get('HomeRegion')
+            self._region = response.json().get('HomeRegion') or self.aws_authenticator.region
         return self._region
 
     @staticmethod
@@ -792,6 +793,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
     def busy(self):
         """Busy."""
         return any([self.status == 'IN_PROGRESS',
+                    self.status == 'DELETE_IN_PROGRESS',
                     self.get_changing_accounts()])
 
     @property
@@ -1037,4 +1039,17 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             self.logger.error('Failed to deploy control tower, retries were spent.. Maybe try again later?')
             return False
         self.logger.debug('Successfully started deploying control tower.')
+        return True
+
+    def decommission(self):
+        payload = self._get_api_payload(content_string={},
+                                        target='deleteLandingZone',
+                                        region=self.region)
+        response = self.session.post(self.url, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to decommission control tower with response status "%s" and response text "%s"',
+                              response.status_code, response.text)
+            return False
+        self._is_deployed = None
+        self.logger.debug('Successfully started decommissioning control tower.')
         return True
