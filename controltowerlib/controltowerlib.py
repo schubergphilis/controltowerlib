@@ -166,7 +166,8 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                                   '"%s" and response text "%s"',
                                   response.status_code, response.text)
                 raise ServiceCallFailed(payload)
-            self._is_deployed = response.json().get('LandingZoneStatus') not in ('NOT_STARTED', 'DELETE_COMPLETED')
+            not_deployed_states = ('NOT_STARTED', 'DELETE_COMPLETED', 'DELETE_FAILED')
+            self._is_deployed = response.json().get('LandingZoneStatus') not in not_deployed_states
         return self._is_deployed
 
     @property
