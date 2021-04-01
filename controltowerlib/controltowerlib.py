@@ -1052,6 +1052,16 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         return True
 
     def decommission(self):
+        """Decommissions a landing zone.
+
+        The api call does not seem to be enough and although the resources are decomissioned like with
+        the proper process, control tower responds with a delete failed on the api, so it seems that
+        aws needs to perform actions on their end for the decommissioning to be successful.
+
+        Returns:
+            response (bool): True if the process starts successfully, False otherwise.
+
+        """
         payload = self._get_api_payload(content_string={},
                                         target='deleteLandingZone',
                                         region=self.region)

@@ -34,10 +34,11 @@ Import all parts from resources here
 
 from time import sleep
 
+from awsauthenticationlib.awsauthenticationlib import LoggerMixin
+
 from controltowerlib.controltowerlibexceptions import (NonExistentSCP,
                                                        ControlTowerBusy,
                                                        NoSuspendedOU)
-from awsauthenticationlib.awsauthenticationlib import LoggerMixin
 
 __author__ = '''Costas Tyfoxylos <ctyfoxylos@schubergphilis.com>'''
 __docformat__ = '''google'''
