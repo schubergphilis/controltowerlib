@@ -32,8 +32,7 @@ Import all parts from configuration here
    http://google.github.io/styleguide/pyguide.html
 """
 
-from .configuration import (LoggerMixin,
-                            LOGGER,
+from .configuration import (LOGGER,
                             LOGGER_BASENAME,
                             CREATING_ACCOUNT_ERROR_MESSAGE)
 
@@ -56,7 +55,6 @@ __status__ = '''Development'''  # "Prototype", "Development", "Production".
 
 # This is to 'use' the module(s), so lint doesn't complain
 
-assert LoggerMixin
 assert LOGGER
 assert LOGGER_BASENAME
 assert CREATING_ACCOUNT_ERROR_MESSAGE

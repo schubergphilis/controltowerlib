@@ -42,6 +42,7 @@ import boto3
 import botocore
 import requests
 from awsauthenticationlib import AwsAuthenticator
+from awsauthenticationlib.awsauthenticationlib import LoggerMixin
 from opnieuw import retry
 
 from .controltowerlibexceptions import (UnsupportedTarget,
@@ -55,8 +56,7 @@ from .controltowerlibexceptions import (UnsupportedTarget,
                                         EmailInUse,
                                         UnavailableRegion,
                                         RoleCreationFailure)
-from .resources import (LoggerMixin,
-                        LOGGER,
+from .resources import (LOGGER,
                         LOGGER_BASENAME,
                         ServiceControlPolicy,
                         CoreAccount,
@@ -104,7 +104,8 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                          'getCatastrophicDrift',
                          'getGuardrailComplianceStatus',
                          'describeAccountFactoryConfig',
-                         'performPreLaunchChecks'
+                         'performPreLaunchChecks',
+                         'deleteLandingZone'
                          ]
     core_account_types = ['PRIMARY', 'LOGGING', 'SECURITY']
 
@@ -125,7 +126,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
         return wrap
 
-    def __init__(self, arn, settling_time=60):
+    def __init__(self, arn, settling_time=90):
         self.aws_authenticator = AwsAuthenticator(arn)
         self.service_catalog = boto3.client('servicecatalog', **self.aws_authenticator.assumed_role_credentials)
         self.organizations = boto3.client('organizations', **self.aws_authenticator.assumed_role_credentials)
@@ -165,7 +166,8 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                                   '"%s" and response text "%s"',
                                   response.status_code, response.text)
                 raise ServiceCallFailed(payload)
-            self._is_deployed = response.json().get('LandingZoneStatus') != 'NOT_STARTED'
+            not_deployed_states = ('NOT_STARTED', 'DELETE_COMPLETED', 'DELETE_FAILED')
+            self._is_deployed = response.json().get('LandingZoneStatus') not in not_deployed_states
         return self._is_deployed
 
     @property
@@ -181,7 +183,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             response = self.session.post(url, json=payload)
             if not response.ok:
                 raise ServiceCallFailed(payload)
-            self._region = response.json().get('HomeRegion')
+            self._region = response.json().get('HomeRegion') or self.aws_authenticator.region
         return self._region
 
     @staticmethod
@@ -447,7 +449,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                               'and response text "%s"',
                               org_ou.name, response.status_code, response.text)
             return False
-        self.logger.debug('Giving %s time for the guardrails to be applied', self.settling_time)
+        self.logger.debug('Giving %s seconds time for the guardrails to be applied', self.settling_time)
         time.sleep(self.settling_time)
         self.logger.debug('Successfully moved management of OU "%s" under Control Tower', org_ou.name)
         return response.ok
@@ -729,7 +731,16 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             if CREATING_ACCOUNT_ERROR_MESSAGE in err.response['Error']['Message']:
                 raise OUCreating
             raise
-        return response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200
+        response_metadata = response.get('ResponseMetadata', {})
+        success = response_metadata.get('HTTPStatusCode') == 200
+        if not success:
+            self.logger.error('Failed to create account, response was :%s', response_metadata)
+            return False
+        # Making sure that eventual consistency is not a problem here,
+        # we wait for control tower to be aware of the service catalog process
+        while not self.busy:
+            time.sleep(1)
+        return True
 
     @property
     @validate_availability
@@ -792,6 +803,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
     def busy(self):
         """Busy."""
         return any([self.status == 'IN_PROGRESS',
+                    self.status == 'DELETE_IN_PROGRESS',
                     self.get_changing_accounts()])
 
     @property
@@ -1037,4 +1049,27 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             self.logger.error('Failed to deploy control tower, retries were spent.. Maybe try again later?')
             return False
         self.logger.debug('Successfully started deploying control tower.')
+        return True
+
+    def decommission(self):
+        """Decommissions a landing zone.
+
+        The api call does not seem to be enough and although the resources are decomissioned like with
+        the proper process, control tower responds with a delete failed on the api, so it seems that
+        aws needs to perform actions on their end for the decommissioning to be successful.
+
+        Returns:
+            response (bool): True if the process starts successfully, False otherwise.
+
+        """
+        payload = self._get_api_payload(content_string={},
+                                        target='deleteLandingZone',
+                                        region=self.region)
+        response = self.session.post(self.url, json=payload)
+        if not response.ok:
+            self.logger.error('Failed to decommission control tower with response status "%s" and response text "%s"',
+                              response.status_code, response.text)
+            return False
+        self._is_deployed = None
+        self.logger.debug('Successfully started decommissioning control tower.')
         return True

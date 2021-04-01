@@ -7,8 +7,8 @@
 #
 # Please use Pipfile to update the requirements.
 #
-boto3>=1.17.25
+boto3>=1.17.42
 opnieuw>=1.1.0
 requests>=2.25.1
 beautifulsoup4>=4.9.3
-awsauthenticationlib>=0.4.0
+awsauthenticationlib>=0.5.0
