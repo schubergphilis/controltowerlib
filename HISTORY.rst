@@ -43,3 +43,9 @@ History
 ------------------
 
 * Made account deletion not depending on the suspended OU existance and account factory retrieval checking for CT being deployed.
+
+
+0.5.0 (01-04-2021)
+------------------
+
+* Implemented (not properly functioning still) decommissioning of control tower.
