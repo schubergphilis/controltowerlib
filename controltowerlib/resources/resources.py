@@ -37,7 +37,7 @@ from time import sleep
 from controltowerlib.controltowerlibexceptions import (NonExistentSCP,
                                                        ControlTowerBusy,
                                                        NoSuspendedOU)
-from .configuration import LoggerMixin
+from awsauthenticationlib.awsauthenticationlib import LoggerMixin
 
 __author__ = '''Costas Tyfoxylos <ctyfoxylos@schubergphilis.com>'''
 __docformat__ = '''google'''

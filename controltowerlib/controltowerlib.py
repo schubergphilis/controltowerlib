@@ -42,6 +42,7 @@ import boto3
 import botocore
 import requests
 from awsauthenticationlib import AwsAuthenticator
+from awsauthenticationlib.awsauthenticationlib import LoggerMixin
 from opnieuw import retry
 
 from .controltowerlibexceptions import (UnsupportedTarget,
@@ -55,8 +56,7 @@ from .controltowerlibexceptions import (UnsupportedTarget,
                                         EmailInUse,
                                         UnavailableRegion,
                                         RoleCreationFailure)
-from .resources import (LoggerMixin,
-                        LOGGER,
+from .resources import (LOGGER,
                         LOGGER_BASENAME,
                         ServiceControlPolicy,
                         CoreAccount,

@@ -49,17 +49,3 @@ LOGGER = logging.getLogger(LOGGER_BASENAME)
 LOGGER.addHandler(logging.NullHandler())
 
 CREATING_ACCOUNT_ERROR_MESSAGE = 'Package is in state CREATING, but must be in state AVAILABLE'
-
-
-class LoggerMixin:  # pylint: disable=too-few-public-methods
-    """Logger."""
-
-    @property
-    def logger(self):
-        """Exposes the logger to be used by objects using the Mixin.
-
-        Returns:
-            logger (logger): The properly named logger.
-
-        """
-        return logging.getLogger(f'{LOGGER_BASENAME}.{self.__class__.__name__}')
