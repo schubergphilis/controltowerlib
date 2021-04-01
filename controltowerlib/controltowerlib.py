@@ -126,7 +126,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
 
         return wrap
 
-    def __init__(self, arn, settling_time=60):
+    def __init__(self, arn, settling_time=90):
         self.aws_authenticator = AwsAuthenticator(arn)
         self.service_catalog = boto3.client('servicecatalog', **self.aws_authenticator.assumed_role_credentials)
         self.organizations = boto3.client('organizations', **self.aws_authenticator.assumed_role_credentials)
@@ -449,7 +449,7 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
                               'and response text "%s"',
                               org_ou.name, response.status_code, response.text)
             return False
-        self.logger.debug('Giving %s time for the guardrails to be applied', self.settling_time)
+        self.logger.debug('Giving %s seconds time for the guardrails to be applied', self.settling_time)
         time.sleep(self.settling_time)
         self.logger.debug('Successfully moved management of OU "%s" under Control Tower', org_ou.name)
         return response.ok
@@ -731,7 +731,16 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
             if CREATING_ACCOUNT_ERROR_MESSAGE in err.response['Error']['Message']:
                 raise OUCreating
             raise
-        return response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200
+        response_metadata = response.get('ResponseMetadata', {})
+        success = response_metadata.get('HTTPStatusCode') == 200
+        if not success:
+            self.logger.error('Failed to create account, response was :%s', response_metadata)
+            return False
+        # Making sure that eventual consistency is not a problem here,
+        # we wait for control tower to be aware of the service catalog process
+        while not self.busy:
+            time.sleep(1)
+        return True
 
     @property
     @validate_availability
