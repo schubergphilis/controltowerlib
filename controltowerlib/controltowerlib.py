@@ -826,7 +826,6 @@ class ControlTower(LoggerMixin):  # pylint: disable=too-many-instance-attributes
         """Region metadata list."""
         return self._get_status().get('RegionMetadataList')
 
-    @lru_cache(maxsize=2)
     def _get_status(self):
         payload = self._get_api_payload(content_string={},
                                         target='getLandingZoneStatus')
