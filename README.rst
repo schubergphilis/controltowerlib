@@ -7,6 +7,12 @@ A library to provide access to AWS service catalog provided by Control Tower and
 
 * Documentation: https://controltowerlib.readthedocs.org/en/latest
 
+DEPRECATION WARNING
+===================
+
+This library is now part https://github.com/schubergphilis/awsapilib and thus all development on this repo will stop.
+
+
 
 Development Workflow
 ====================
